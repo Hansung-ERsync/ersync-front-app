@@ -7,10 +7,14 @@ class LoginForm extends StatefulWidget {
     super.key,
     required this.onSubmit,
     required this.onSignUp,
+    required this.isLoading,
+    this.initialUsername = '',
   });
 
-  final VoidCallback onSubmit;
+  final Future<void> Function(String username, String password) onSubmit;
   final VoidCallback onSignUp;
+  final bool isLoading;
+  final String initialUsername;
 
   @override
   State<LoginForm> createState() => _LoginFormState();
@@ -18,9 +22,15 @@ class LoginForm extends StatefulWidget {
 
 class _LoginFormState extends State<LoginForm> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _usernameController = TextEditingController();
+  late final TextEditingController _usernameController;
   final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _usernameController = TextEditingController(text: widget.initialUsername);
+  }
 
   @override
   void dispose() {
@@ -29,11 +39,14 @@ class _LoginFormState extends State<LoginForm> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     FocusManager.instance.primaryFocus?.unfocus();
 
     if (_formKey.currentState?.validate() ?? false) {
-      widget.onSubmit();
+      await widget.onSubmit(
+        _usernameController.text.trim(),
+        _passwordController.text,
+      );
     }
   }
 
@@ -106,8 +119,16 @@ class _LoginFormState extends State<LoginForm> {
             width: double.infinity,
             child: FilledButton(
               key: const Key('loginButton'),
-              onPressed: _submit,
-              child: const Text('로그인'),
+              onPressed: widget.isLoading ? null : _submit,
+              child: widget.isLoading
+                  ? const SizedBox.square(
+                      dimension: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.textOnDark,
+                      ),
+                    )
+                  : const Text('로그인'),
             ),
           ),
           const SizedBox(height: 12),
@@ -115,7 +136,7 @@ class _LoginFormState extends State<LoginForm> {
             width: double.infinity,
             child: TextButton(
               key: const Key('signUpButton'),
-              onPressed: widget.onSignUp,
+              onPressed: widget.isLoading ? null : widget.onSignUp,
               child: const Text('가입 코드로 회원가입'),
             ),
           ),

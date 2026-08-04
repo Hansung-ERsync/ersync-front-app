@@ -30,7 +30,10 @@ abstract final class AppColors {
   static const Color statusChecking = Color(0xFFA65F00);
   static const Color statusNegative = Color(0xFFE7000B);
   static const Color statusInfo = Color(0xFF155DFC);
+  static const Color statusUnavailable = Color(0xFF475467);
+  static const Color statusRefused = Color(0xFFB42318);
 
+  static const Color positiveBadgeBackground = Color(0xFFDCFCE7);
   static const Color positiveBackground = Color(0xFFF0FDF4);
   static const Color positiveBorder = Color(0xFFBBF7D0);
   static const Color checkingBackground = Color(0xFFFFFBEB);
@@ -39,6 +42,8 @@ abstract final class AppColors {
   static const Color negativeBorder = Color(0xFFFECACA);
   static const Color infoBackground = Color(0xFFEFF6FF);
   static const Color infoBorder = Color(0xFFBFDBFE);
+  static const Color unavailableBackground = Color(0xFFF8FAFC);
+  static const Color unavailableBorder = Color(0xFFD0D5DD);
 
   // Pre-KTAS button backgrounds
   static const Color preKtasLevel1 = Color(0xFFE7000B);
