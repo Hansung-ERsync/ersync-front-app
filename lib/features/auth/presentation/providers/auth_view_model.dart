@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/app_exception.dart';
+import '../../../../core/network/api_providers.dart';
+import '../../data/apis/auth_api.dart';
 import '../../data/datasources/mock_auth_data_source.dart';
+import '../../data/repositories/api_auth_repository.dart';
 import '../../data/repositories/mock_auth_repository.dart';
 import '../../domain/entities/auth_user.dart';
 import '../../domain/entities/invitation_info.dart';
@@ -16,6 +19,14 @@ final Provider<MockAuthDataSource> mockAuthDataSourceProvider =
 final Provider<AuthRepository> authRepositoryProvider =
     Provider<AuthRepository>(
       (Ref ref) => MockAuthRepository(ref.watch(mockAuthDataSourceProvider)),
+    );
+
+final Provider<AuthRepository> apiAuthRepositoryProvider =
+    Provider<AuthRepository>(
+      (Ref ref) => ApiAuthRepository(
+        AuthApi(ref.watch(dioProvider)),
+        ref.watch(tokenStorageProvider),
+      ),
     );
 
 final Provider<ValidateInvitationCode> validateInvitationCodeProvider =
@@ -45,6 +56,33 @@ class AuthViewModel extends Notifier<AuthState> {
     );
   }
 
+  Future<bool> restoreSession() async {
+    if (state.user != null || state.isRestoringSession) {
+      return state.user != null;
+    }
+    state = state.copyWith(isRestoringSession: true, clearError: true);
+    try {
+      final AuthUser? user = await ref
+          .read(authRepositoryProvider)
+          .restoreSession();
+      state = state.copyWith(
+        isRestoringSession: false,
+        user: user,
+        clearUser: user == null,
+        clearError: true,
+      );
+      return user != null;
+    } on AppException catch (error) {
+      state = state.copyWith(
+        isRestoringSession: false,
+        errorMessage: error.message,
+        errorCode: error.code,
+        traceId: error.traceId,
+      );
+      return false;
+    }
+  }
+
   Future<bool> validateInvitationCode(String code) async {
     state = state.copyWith(isLoading: true, clearError: true);
 
@@ -59,7 +97,12 @@ class AuthViewModel extends Notifier<AuthState> {
       );
       return true;
     } on AppException catch (error) {
-      state = state.copyWith(isLoading: false, errorMessage: error.message);
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: error.message,
+        errorCode: error.code,
+        traceId: error.traceId,
+      );
       return false;
     }
   }
@@ -93,11 +136,24 @@ class AuthViewModel extends Notifier<AuthState> {
       state = state.copyWith(
         isLoading: false,
         registeredUsername: username.trim(),
+        clearInvitation: true,
         clearError: true,
       );
       return true;
     } on AppException catch (error) {
-      state = state.copyWith(isLoading: false, errorMessage: error.message);
+      final bool invitationUnavailable = const <String>{
+        'INVITATION_001',
+        'INVITATION_002',
+        'INVITATION_003',
+        'INVITATION_004',
+      }.contains(error.code);
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: error.message,
+        errorCode: error.code,
+        traceId: error.traceId,
+        clearInvitation: invitationUnavailable,
+      );
       return false;
     }
   }
@@ -116,12 +172,18 @@ class AuthViewModel extends Notifier<AuthState> {
       state = state.copyWith(isLoading: false, user: user, clearError: true);
       return true;
     } on AppException catch (error) {
-      state = state.copyWith(isLoading: false, errorMessage: error.message);
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: error.message,
+        errorCode: error.code,
+        traceId: error.traceId,
+      );
       return false;
     }
   }
 
-  void signOut() {
+  Future<void> signOut() async {
+    await ref.read(authRepositoryProvider).signOut();
     state = const AuthState();
   }
 }
@@ -129,31 +191,45 @@ class AuthViewModel extends Notifier<AuthState> {
 class AuthState {
   const AuthState({
     this.isLoading = false,
+    this.isRestoringSession = false,
     this.invitation,
     this.user,
     this.errorMessage,
+    this.errorCode,
+    this.traceId,
     this.registeredUsername,
   });
 
   final bool isLoading;
+  final bool isRestoringSession;
   final InvitationInfo? invitation;
   final AuthUser? user;
   final String? errorMessage;
+  final String? errorCode;
+  final String? traceId;
   final String? registeredUsername;
 
   AuthState copyWith({
     bool? isLoading,
+    bool? isRestoringSession,
     InvitationInfo? invitation,
     AuthUser? user,
     String? errorMessage,
+    String? errorCode,
+    String? traceId,
     String? registeredUsername,
     bool clearError = false,
+    bool clearInvitation = false,
+    bool clearUser = false,
   }) {
     return AuthState(
       isLoading: isLoading ?? this.isLoading,
-      invitation: invitation ?? this.invitation,
-      user: user ?? this.user,
+      isRestoringSession: isRestoringSession ?? this.isRestoringSession,
+      invitation: clearInvitation ? null : invitation ?? this.invitation,
+      user: clearUser ? null : user ?? this.user,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
+      errorCode: clearError ? null : errorCode ?? this.errorCode,
+      traceId: clearError ? null : traceId ?? this.traceId,
       registeredUsername: registeredUsername ?? this.registeredUsername,
     );
   }

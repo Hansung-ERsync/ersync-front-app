@@ -4,8 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/domain/entities/auth_user.dart';
+import '../../../patient_assessment/presentation/providers/patient_assessment_view_model.dart';
 import '../../../settings/presentation/providers/app_guide_provider.dart';
 import '../../../settings/presentation/widgets/app_guide_prompt_sheet.dart';
+import '../../../transport/domain/entities/active_transport_recovery.dart';
+import '../../../transport/presentation/providers/transport_view_model.dart';
 import '../providers/home_view_model.dart';
 import '../widgets/new_patient_button.dart';
 import '../widgets/recent_transport_list.dart';
@@ -19,6 +22,10 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   bool _guideCheckStarted = false;
+  bool _activeRecoveryCheckStarted = false;
+  bool _activeRecoveryResolved = false;
+  String? _activeRecoveryError;
+  bool _isStartingNewPatient = false;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +41,16 @@ class _HomePageState extends ConsumerState<HomePage> {
           error: (Object error, StackTrace stackTrace) =>
               _HomeError(onLogin: () => context.goNamed('login')),
           data: (HomeViewState state) {
-            _scheduleInitialGuide(state.user);
+            _scheduleActiveRecovery(state.user);
+            if (_activeRecoveryError != null) {
+              return _ActiveRecoveryError(
+                message: _activeRecoveryError!,
+                onRetry: () => _retryActiveRecovery(state.user),
+              );
+            }
+            if (_activeRecoveryResolved) {
+              _scheduleInitialGuide(state.user);
+            }
             return Column(
               children: <Widget>[
                 Container(
@@ -89,9 +105,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                                   children: <Widget>[
                                     const SizedBox(height: 56),
                                     NewPatientButton(
-                                      onPressed: () => context.pushNamed(
-                                        'patientAssessment',
-                                      ),
+                                      onPressed: _isStartingNewPatient
+                                          ? null
+                                          : _startNewPatient,
+                                      isLoading: _isStartingNewPatient,
                                     ),
                                     const Spacer(),
                                     const SizedBox(height: 72),
@@ -112,6 +129,86 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
       ),
     );
+  }
+
+  void _scheduleActiveRecovery(AuthUser user) {
+    if (_activeRecoveryCheckStarted) {
+      return;
+    }
+    _activeRecoveryCheckStarted = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _recoverActiveTransport(user);
+    });
+  }
+
+  Future<void> _recoverActiveTransport(AuthUser user) async {
+    final ActiveTransportRecovery? recovery;
+    try {
+      recovery = await ref
+          .read(transportRepositoryProvider)
+          .recoverActiveTransport();
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _activeRecoveryError =
+              '진행 중 이송 상태를 확인하지 못했습니다. 네트워크를 확인하고 다시 시도해주세요.';
+        });
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    final searchSession = recovery?.searchSession;
+    if (searchSession != null) {
+      context.goNamed(
+        'hospitalSearch',
+        pathParameters: <String, String>{'requestId': searchSession.requestId},
+        extra: searchSession,
+      );
+      return;
+    }
+    final transportSession = recovery?.transportSession;
+    if (transportSession != null) {
+      context.goNamed(
+        'transportInProgress',
+        pathParameters: <String, String>{
+          'requestId': transportSession.requestId,
+        },
+        extra: transportSession,
+      );
+      return;
+    }
+    setState(() => _activeRecoveryResolved = true);
+    _scheduleInitialGuide(user);
+  }
+
+  void _retryActiveRecovery(AuthUser user) {
+    setState(() => _activeRecoveryError = null);
+    _recoverActiveTransport(user);
+  }
+
+  Future<void> _startNewPatient() async {
+    if (_isStartingNewPatient) {
+      return;
+    }
+    setState(() => _isStartingNewPatient = true);
+    // A cancelled/completed transport clears its draft at that command's
+    // success boundary. Otherwise keep the secure local draft so an app
+    // restart or temporary network failure can resume the same request key.
+    try {
+      ref.invalidate(patientAssessmentViewModelProvider);
+      if (mounted) {
+        // Navigate immediately and let the assessment page show its loading
+        // state while protocol/GPS initialization finishes. Invalidation
+        // prevents the previous patient's last step from flashing.
+        await context.pushNamed('patientAssessment');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isStartingNewPatient = false);
+      }
+    }
   }
 
   void _scheduleInitialGuide(AuthUser user) {
@@ -173,6 +270,45 @@ class _HomeError extends StatelessWidget {
             const Text('로그인이 필요합니다.'),
             const SizedBox(height: 20),
             FilledButton(onPressed: onLogin, child: const Text('로그인으로 이동')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActiveRecoveryError extends StatelessWidget {
+  const _ActiveRecoveryError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(
+              Icons.sync_problem_rounded,
+              color: AppColors.statusChecking,
+              size: 44,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(height: 1.5),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              key: const Key('retryActiveTransportRecoveryButton'),
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('진행 중 이송 다시 확인'),
+            ),
           ],
         ),
       ),

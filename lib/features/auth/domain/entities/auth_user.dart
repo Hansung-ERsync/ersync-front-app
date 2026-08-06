@@ -9,10 +9,14 @@ class AuthUser {
     required this.role,
     required this.callbackContact,
     required this.consentRecord,
+    this.accountId = '',
+    this.organizationId = '',
   });
 
+  final String accountId;
   final String username;
   final String displayName;
+  final String organizationId;
   final String organizationName;
   final UserRole role;
   final String callbackContact;

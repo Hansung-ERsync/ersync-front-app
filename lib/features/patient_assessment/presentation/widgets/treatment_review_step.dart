@@ -54,6 +54,20 @@ class TreatmentReviewStep extends StatelessWidget {
                     )
                     .toList(),
               ),
+              ...draft.treatments
+                  .where((TreatmentType value) => value != TreatmentType.none)
+                  .map(
+                    (TreatmentType type) => Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: _TreatmentDetailsCard(
+                        type: type,
+                        entry:
+                            draft.treatmentEntries[type] ??
+                            const TreatmentEntryDraft(),
+                        viewModel: viewModel,
+                      ),
+                    ),
+                  ),
             ],
           ),
         ),
@@ -75,11 +89,7 @@ class TreatmentReviewStep extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 28),
-        const AssessmentSectionTitle(
-          title: '상황별 추가 평가',
-          description: '발동 규칙 확정 전 개발용 선택 입력입니다.',
-          required: false,
-        ),
+        const AssessmentSectionTitle(title: '추가 입력', required: false),
         const SizedBox(height: 10),
         _SupplementalAssessmentCard(
           draft: draft,
@@ -90,6 +100,165 @@ class TreatmentReviewStep extends StatelessWidget {
       ],
     );
   }
+}
+
+class _TreatmentDetailsCard extends StatelessWidget {
+  const _TreatmentDetailsCard({
+    required this.type,
+    required this.entry,
+    required this.viewModel,
+  });
+
+  final TreatmentType type;
+  final TreatmentEntryDraft entry;
+  final PatientAssessmentViewModel viewModel;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<_TreatmentFieldSpec> fields = _fieldsFor(type);
+    return Container(
+      key: Key('treatmentDetails_${type.apiValue}'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            '${type.label} 상세',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          _AssessmentDropdownField<TreatmentAttemptResult>(
+            key: Key('treatmentResult_${type.apiValue}'),
+            initialValue: entry.attemptResult,
+            labelText: '처치 결과',
+            items: TreatmentAttemptResult.values
+                .map(
+                  (TreatmentAttemptResult value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(
+                      value.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (TreatmentAttemptResult? value) {
+              if (value != null) {
+                viewModel.setTreatmentAttemptResult(type, value);
+              }
+            },
+          ),
+          ...fields.map(
+            (_TreatmentFieldSpec field) => Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: TextFormField(
+                key: Key('treatment_${type.apiValue}_${field.key}'),
+                initialValue: entry.details[field.key] ?? '',
+                keyboardType: field.numeric
+                    ? const TextInputType.numberWithOptions(decimal: true)
+                    : TextInputType.text,
+                maxLength: field.maxLength,
+                minLines: field.multiline ? 2 : 1,
+                maxLines: field.multiline ? 3 : 1,
+                decoration: InputDecoration(
+                  labelText: field.label,
+                  hintText: field.hint,
+                ),
+                onChanged: (String value) =>
+                    viewModel.setTreatmentDetail(type, field.key, value),
+              ),
+            ),
+          ),
+          if (type == TreatmentType.cpr)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(
+                'CPR 시작 시각은 아래에서 선택하는 처치 시행 시각으로 기록됩니다.',
+                style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  List<_TreatmentFieldSpec> _fieldsFor(TreatmentType type) {
+    return switch (type) {
+      TreatmentType.oxygen => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('method', '투여 방법', '예: MASK'),
+        _TreatmentFieldSpec('flowRateLpm', '유량 (L/min)', '예: 5', numeric: true),
+      ],
+      TreatmentType.airway => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('device', '기도 확보 기구', '예: OPA'),
+      ],
+      TreatmentType.cpr => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('currentStatus', '현재 상태', '예: ONGOING'),
+      ],
+      TreatmentType.defibrillationAed => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('shockCount', '충격 횟수', '예: 1', numeric: true),
+      ],
+      TreatmentType.ivFluid => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('fluidName', '수액명', '예: NORMAL_SALINE'),
+        _TreatmentFieldSpec('amountMl', '투여량 (mL)', '예: 500', numeric: true),
+      ],
+      TreatmentType.medication => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('medicationName', '약물명', '약물명을 입력하세요'),
+        _TreatmentFieldSpec('dose', '용량', '예: 0.3mg'),
+        _TreatmentFieldSpec('route', '투여 경로', '예: IM'),
+      ],
+      TreatmentType.bleedingWound ||
+      TreatmentType.immobilization => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('method', '처치 방법', '처치 방법을 입력하세요'),
+        _TreatmentFieldSpec('site', '처치 부위', '처치 부위를 입력하세요'),
+      ],
+      TreatmentType.ecg => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('leadType', '리드 종류', '예: 12_LEAD'),
+      ],
+      TreatmentType.warmingCooling => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('method', '처치 방법', '처치 방법을 입력하세요'),
+      ],
+      TreatmentType.delivery => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec('currentStatus', '현재 상태', '분만 현재 상태를 입력하세요'),
+      ],
+      TreatmentType.other => const <_TreatmentFieldSpec>[
+        _TreatmentFieldSpec(
+          'detail',
+          '상세 내용',
+          '시행한 처치를 입력하세요',
+          multiline: true,
+          maxLength: 200,
+        ),
+      ],
+      TreatmentType.none => const <_TreatmentFieldSpec>[],
+    };
+  }
+}
+
+class _TreatmentFieldSpec {
+  const _TreatmentFieldSpec(
+    this.key,
+    this.label,
+    this.hint, {
+    this.numeric = false,
+    this.multiline = false,
+    this.maxLength,
+  });
+
+  final String key;
+  final String label;
+  final String hint;
+  final bool numeric;
+  final bool multiline;
+  final int? maxLength;
 }
 
 class _SupplementalAssessmentCard extends StatelessWidget {
@@ -179,37 +348,22 @@ class _SupplementalAssessmentCard extends StatelessWidget {
               ),
               children: <Widget>[
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Expanded(
-                      child: DropdownButtonFormField<PupilResponse>(
+                      child: _PupilResponseField(
                         key: const Key('leftPupilInput'),
+                        title: '좌측',
                         initialValue: draft.leftPupil,
-                        decoration: const InputDecoration(labelText: '좌측'),
-                        items: PupilResponse.values
-                            .map(
-                              (PupilResponse value) => DropdownMenuItem(
-                                value: value,
-                                child: Text(value.label),
-                              ),
-                            )
-                            .toList(),
                         onChanged: viewModel.setLeftPupil,
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: DropdownButtonFormField<PupilResponse>(
+                      child: _PupilResponseField(
                         key: const Key('rightPupilInput'),
+                        title: '우측',
                         initialValue: draft.rightPupil,
-                        decoration: const InputDecoration(labelText: '우측'),
-                        items: PupilResponse.values
-                            .map(
-                              (PupilResponse value) => DropdownMenuItem(
-                                value: value,
-                                child: Text(value.label),
-                              ),
-                            )
-                            .toList(),
                         onChanged: viewModel.setRightPupil,
                       ),
                     ),
@@ -287,6 +441,98 @@ class _SupplementalAssessmentCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PupilResponseField extends StatelessWidget {
+  const _PupilResponseField({
+    super.key,
+    required this.title,
+    required this.initialValue,
+    required this.onChanged,
+  });
+
+  final String title;
+  final PupilResponse? initialValue;
+  final ValueChanged<PupilResponse?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(left: 2),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        _AssessmentDropdownField<PupilResponse>(
+          initialValue: initialValue,
+          hintText: '선택',
+          items: PupilResponse.values
+              .map(
+                (PupilResponse value) => DropdownMenuItem<PupilResponse>(
+                  value: value,
+                  child: Text(
+                    value.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+class _AssessmentDropdownField<T> extends StatelessWidget {
+  const _AssessmentDropdownField({
+    super.key,
+    required this.initialValue,
+    required this.items,
+    required this.onChanged,
+    this.labelText,
+    this.hintText,
+  });
+
+  final T? initialValue;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?> onChanged;
+  final String? labelText;
+  final String? hintText;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<T>(
+      initialValue: initialValue,
+      isExpanded: true,
+      dropdownColor: AppColors.surface,
+      focusColor: AppColors.infoBackground,
+      elevation: 4,
+      borderRadius: BorderRadius.circular(12),
+      menuMaxHeight: 320,
+      icon: const Icon(
+        Icons.keyboard_arrow_down_rounded,
+        color: AppColors.textSecondary,
+      ),
+      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+        color: AppColors.textPrimary,
+        fontWeight: FontWeight.w700,
+      ),
+      decoration: InputDecoration(labelText: labelText, hintText: hintText),
+      items: items,
+      onChanged: onChanged,
     );
   }
 }

@@ -17,6 +17,11 @@ class MockPatientAssessmentRepository implements PatientAssessmentRepository {
   }
 
   @override
+  Future<void> clearDraft() {
+    return _dataSource.clearDraft();
+  }
+
+  @override
   Future<TransferRequestReceipt> submit(PatientAssessmentDraft draft) {
     return _dataSource.submit(draft);
   }

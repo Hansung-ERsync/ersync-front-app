@@ -43,6 +43,15 @@ abstract final class AppTheme {
 
     return base.copyWith(
       colorScheme: colorScheme,
+      // ThemeData is created before the ERSync ColorScheme is applied, so
+      // legacy Material surfaces (notably DropdownButton's popup route) would
+      // otherwise keep the default purple-tinted Android colors.
+      canvasColor: AppColors.surface,
+      disabledColor: AppColors.disabled,
+      focusColor: AppColors.infoBackground,
+      hoverColor: AppColors.surfaceMuted,
+      highlightColor: AppColors.infoBackground,
+      splashColor: AppColors.infoBackground,
       scaffoldBackgroundColor: AppColors.background,
       textTheme: textTheme,
       appBarTheme: const AppBarTheme(
@@ -147,6 +156,29 @@ abstract final class AppTheme {
         secondaryLabelStyle: const TextStyle(color: AppColors.textOnDark),
         side: const BorderSide(color: AppColors.border),
         shape: const RoundedRectangleBorder(borderRadius: _controlRadius),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+          if (states.contains(WidgetState.disabled)) {
+            return AppColors.textDisabled;
+          }
+          return states.contains(WidgetState.selected)
+              ? AppColors.textOnDark
+              : AppColors.textTertiary;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+          if (states.contains(WidgetState.disabled)) {
+            return AppColors.surfaceMuted;
+          }
+          return states.contains(WidgetState.selected)
+              ? AppColors.primary
+              : AppColors.surfaceMuted;
+        }),
+        trackOutlineColor: WidgetStateProperty.resolveWith(
+          (Set<WidgetState> states) => states.contains(WidgetState.selected)
+              ? AppColors.primary
+              : AppColors.border,
+        ),
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: AppColors.primary,

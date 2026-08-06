@@ -182,6 +182,9 @@ class _SignUpAccountPageState extends ConsumerState<SignUpAccountPage> {
                 if (displayName.length < 2) {
                   return '이름은 2자 이상 입력해주세요';
                 }
+                if (displayName.length > 50) {
+                  return '이름은 50자 이하로 입력해주세요';
+                }
                 return null;
               },
             ),
@@ -225,8 +228,8 @@ class _SignUpAccountPageState extends ConsumerState<SignUpAccountPage> {
                 if (username.isEmpty) {
                   return '아이디를 입력해주세요';
                 }
-                if (username.length < 4) {
-                  return '아이디는 4자 이상 입력해주세요';
+                if (!RegExp(r'^[a-z0-9]{4,30}$').hasMatch(username)) {
+                  return '아이디는 영문 소문자와 숫자 4~30자로 입력해주세요';
                 }
                 return null;
               },
@@ -260,6 +263,9 @@ class _SignUpAccountPageState extends ConsumerState<SignUpAccountPage> {
                 }
                 if (value.length < 8) {
                   return '비밀번호는 8자 이상 입력해주세요';
+                }
+                if (value.length > 64) {
+                  return '비밀번호는 64자 이하로 입력해주세요';
                 }
                 return null;
               },

@@ -53,6 +53,21 @@ class ClinicalClassificationStep extends StatelessWidget {
                     )
                     .toList(),
               ),
+              if (draft.primarySymptom == PatientSymptom.other) ...<Widget>[
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const Key('primarySymptomDetailInput'),
+                  initialValue: draft.primarySymptomDetail,
+                  maxLength: 200,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: '기타 주증상 상세',
+                    hintText: '주증상을 구체적으로 입력해주세요',
+                  ),
+                  onChanged: viewModel.setPrimarySymptomDetail,
+                ),
+              ],
             ],
           ),
         ),
@@ -175,29 +190,50 @@ class ClinicalClassificationStep extends StatelessWidget {
             target: AssessmentValidationTarget.unassessableReason,
             activeTarget: validationTarget,
             message: validationMessage,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.unavailableBackground,
-                border: Border.all(color: AppColors.unavailableBorder),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: UnassessableReason.values
-                    .map(
-                      (UnassessableReason value) => AssessmentChoice(
-                        key: Key('unassessableReason_${value.apiValue}'),
-                        label: value.label,
-                        selected: draft.unassessableReason == value,
-                        selectedColor: AppColors.statusUnavailable,
-                        onTap: () => viewModel.setUnassessableReason(value),
-                      ),
-                    )
-                    .toList(),
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.unavailableBackground,
+                    border: Border.all(color: AppColors.unavailableBorder),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: UnassessableReason.values
+                        .map(
+                          (UnassessableReason value) => AssessmentChoice(
+                            key: Key('unassessableReason_${value.apiValue}'),
+                            label: value.label,
+                            selected: draft.unassessableReason == value,
+                            selectedColor: AppColors.statusUnavailable,
+                            onTap: () => viewModel.setUnassessableReason(value),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+                if (draft.unassessableReason ==
+                    UnassessableReason.other) ...<Widget>[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    key: const Key('unassessableDetailInput'),
+                    initialValue: draft.unassessableDetail,
+                    maxLength: 200,
+                    minLines: 2,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: '기타 평가 불가 상세',
+                      hintText: '평가할 수 없는 사유를 입력해주세요',
+                    ),
+                    onChanged: viewModel.setUnassessableDetail,
+                  ),
+                ],
+              ],
             ),
           ),
         ],

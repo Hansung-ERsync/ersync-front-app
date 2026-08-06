@@ -7,14 +7,18 @@ import 'package:er_sync/features/auth/domain/entities/invitation_info.dart';
 import 'package:er_sync/features/auth/domain/entities/privacy_consent_record.dart';
 import 'package:er_sync/features/auth/presentation/providers/auth_view_model.dart';
 import 'package:er_sync/features/home/presentation/pages/home_page.dart';
+import 'package:er_sync/features/home/presentation/widgets/recent_transport_list.dart';
 import 'package:er_sync/features/hospital_search/data/datasources/mock_hospital_search_data_source.dart';
+import 'package:er_sync/features/hospital_search/domain/entities/accepted_hospital.dart';
 import 'package:er_sync/features/hospital_search/domain/entities/hospital_search_session.dart';
 import 'package:er_sync/features/hospital_search/presentation/pages/hospital_search_page.dart';
+import 'package:er_sync/features/patient_assessment/domain/entities/assessment_enums.dart';
 import 'package:er_sync/features/patient_assessment/presentation/providers/patient_assessment_view_model.dart';
 import 'package:er_sync/features/patient_assessment/presentation/widgets/assessment_section.dart';
 import 'package:er_sync/features/settings/domain/repositories/app_guide_repository.dart';
 import 'package:er_sync/features/settings/presentation/providers/app_guide_provider.dart';
 import 'package:er_sync/features/transport/domain/entities/patient_transport_summary.dart';
+import 'package:er_sync/features/transport/domain/entities/recent_transport.dart';
 import 'package:er_sync/features/transport/domain/entities/transport_session.dart';
 import 'package:er_sync/features/transport/presentation/pages/transport_in_progress_page.dart';
 import 'package:er_sync/features/transport/presentation/providers/transport_view_model.dart';
@@ -36,6 +40,9 @@ void main() {
         child: const ErSyncApp(),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pumpAndSettle();
   }
 
   Future<void> dismissInitialGuide(WidgetTester tester) async {
@@ -76,7 +83,14 @@ void main() {
     await tapAssessmentKey(tester, 'ageStatus_UNKNOWN');
     await tapAssessmentKey(tester, 'patientSex_MALE');
     await tapAssessmentKey(tester, 'occurrenceType_DISEASE');
-    await tapAssessmentKey(tester, 'onsetTimeStatus_UNKNOWN');
+  }
+
+  Future<void> advanceBasicStepWithUnknownOnset(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('assessmentNextButton')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('onsetTimeSheet')), findsOneWidget);
+    await tapAssessmentKey(tester, 'unknownOnsetTimeButton');
+    await confirmTimeSheet(tester, 'confirmOnsetAtButton');
   }
 
   Future<void> completeClassificationStep(WidgetTester tester) async {
@@ -98,6 +112,58 @@ void main() {
     }
   }
 
+  testWidgets('앱 시작 시 남색 ERSync 바이탈 스플래시를 표시한다', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appGuideRepositoryProvider.overrideWithValue(
+            _InMemoryAppGuideRepository(),
+          ),
+        ],
+        child: const ErSyncApp(),
+      ),
+    );
+    await tester.pump();
+
+    final Scaffold splashScaffold = tester.widget<Scaffold>(
+      find.byKey(const Key('splashPage')),
+    );
+    expect(splashScaffold.backgroundColor, AppColors.primary);
+    expect(find.byKey(const Key('splashBrand')), findsOneWidget);
+    expect(find.text('ERSync'), findsOneWidget);
+    expect(find.byKey(const Key('splashVitalAnimation')), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const Key('splashPage')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('splashPage')), findsNothing);
+    expect(find.byKey(const Key('loginButton')), findsOneWidget);
+  });
+
+  testWidgets('저장된 로그인 세션이 있으면 스플래시에서 홈으로 이동한다', (WidgetTester tester) async {
+    final _InMemoryAppGuideRepository guideRepository =
+        _InMemoryAppGuideRepository();
+    await guideRepository.markGuideSeen(MockAuthDataSource.mockUsername);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authViewModelProvider.overrideWith(_AuthenticatedAuthViewModel.new),
+          appGuideRepositoryProvider.overrideWithValue(guideRepository),
+        ],
+        child: const ErSyncApp(),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('splashPage')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.byKey(const Key('loginButton')), findsNothing);
+  });
+
   testWidgets('ERSync 로그인 화면의 주요 요소를 표시한다', (WidgetTester tester) async {
     await pumpApp(tester);
 
@@ -114,6 +180,64 @@ void main() {
     final Image image = tester.widget<Image>(find.byType(Image));
     final AssetImage provider = image.image as AssetImage;
     expect(provider.assetName, AppAssets.shieldMark);
+  });
+
+  testWidgets('최근 이송이 없으면 빈 상태 안내를 표시한다', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Padding(
+            padding: EdgeInsets.all(20),
+            child: RecentTransportList(transports: <RecentTransport>[]),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('recentTransportsEmptyState')), findsOneWidget);
+    expect(find.text('아직 최근 이송이 없습니다'), findsOneWidget);
+    expect(find.text('인계 요청·완료 또는 취소된 이송이 여기에 표시됩니다.'), findsOneWidget);
+    expect(find.byKey(const Key('recentTransportsMoreButton')), findsNothing);
+  });
+
+  testWidgets('최근 이송은 3건 이후 더보기와 접기로 전환한다', (WidgetTester tester) async {
+    final List<RecentTransport> transports = List<RecentTransport>.generate(
+      5,
+      (int index) => RecentTransport(
+        requestId: 'REQUEST-$index',
+        hospitalName: '테스트병원 $index',
+        statusUpdatedAt: DateTime.now().subtract(Duration(hours: index)),
+        handoffStatus: HandoffStatus.completed,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: RecentTransportList(transports: transports),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('recentTransport_REQUEST-0')), findsOneWidget);
+    expect(find.byKey(const Key('recentTransport_REQUEST-2')), findsOneWidget);
+    expect(find.byKey(const Key('recentTransport_REQUEST-3')), findsNothing);
+    expect(find.text('더보기 (2)'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('recentTransportsMoreButton')));
+    await tester.pump();
+    expect(find.byKey(const Key('recentTransport_REQUEST-4')), findsOneWidget);
+    expect(find.text('접기'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('recentTransportsMoreButton')),
+    );
+    await tester.tap(find.byKey(const Key('recentTransportsMoreButton')));
+    await tester.pump();
+    expect(find.byKey(const Key('recentTransport_REQUEST-3')), findsNothing);
+    expect(find.text('더보기 (2)'), findsOneWidget);
   });
 
   testWidgets('빈 로그인 폼을 제출하면 필수값 오류를 표시한다', (WidgetTester tester) async {
@@ -170,6 +294,34 @@ void main() {
     expect(find.text('인계 완료'), findsNWidgets(3));
   });
 
+  testWidgets('새 환자 등록을 연속으로 눌러도 환자 화면은 한 번만 열린다', (WidgetTester tester) async {
+    await pumpApp(tester);
+    await tester.enterText(
+      find.byKey(const Key('usernameField')),
+      MockAuthDataSource.mockUsername,
+    );
+    await tester.enterText(
+      find.byKey(const Key('passwordField')),
+      MockAuthDataSource.mockPassword,
+    );
+    await tester.tap(find.byKey(const Key('loginButton')));
+    await tester.pumpAndSettle();
+    await dismissInitialGuide(tester);
+
+    final Finder newPatientButton = find.byKey(const Key('newPatientButton'));
+    await tester.tap(newPatientButton);
+    await tester.tap(newPatientButton);
+    await tester.pump();
+
+    await tester.pumpAndSettle();
+    expect(find.text('환자 기본 정보'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('assessmentBackButton')));
+    await tester.pumpAndSettle();
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.text('환자 기본 정보'), findsNothing);
+  });
+
   testWidgets('가입 코드로 새 구급대원 계정을 생성한다', (WidgetTester tester) async {
     await pumpApp(tester);
 
@@ -178,7 +330,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('가입 코드 확인'), findsWidgets);
-    await tester.tap(find.byKey(const Key('fillMockInvitationCodeButton')));
+    await tester.enterText(
+      find.byKey(const Key('invitationCodeField')),
+      MockAuthDataSource.mockInvitationCode,
+    );
     await tester.tap(find.byKey(const Key('invitationCodeSubmitButton')));
     await tester.pumpAndSettle();
 
@@ -256,8 +411,7 @@ void main() {
     await tester.tap(find.byKey(const Key('newPatientButton')));
     await tester.pumpAndSettle();
     await completeBasicStep(tester);
-    await tester.tap(find.byKey(const Key('assessmentNextButton')));
-    await tester.pumpAndSettle();
+    await advanceBasicStepWithUnknownOnset(tester);
     await completeClassificationStep(tester);
     await tester.tap(find.byKey(const Key('assessmentNextButton')));
     await tester.pumpAndSettle();
@@ -316,8 +470,7 @@ void main() {
     );
 
     await completeBasicStep(tester);
-    await tester.tap(find.byKey(const Key('assessmentNextButton')));
-    await tester.pumpAndSettle();
+    await advanceBasicStepWithUnknownOnset(tester);
     expect(find.text('증상 및 중증도'), findsOneWidget);
     expect(find.text('2 / 4'), findsOneWidget);
     expect(find.byKey(const Key('preKtasLevel2')), findsNothing);
@@ -351,6 +504,28 @@ void main() {
     expect(find.text('010-0000-0000'), findsNothing);
     expect(find.text('ERSYNC_MVP_1.0'), findsNothing);
 
+    await tapAssessmentKey(tester, 'pupilResponseTile');
+    expect(find.text('좌측'), findsOneWidget);
+    expect(find.text('우측'), findsOneWidget);
+    final DropdownButtonFormField<PupilResponse> leftPupilField = tester
+        .widget<DropdownButtonFormField<PupilResponse>>(
+          find.descendant(
+            of: find.byKey(const Key('leftPupilInput')),
+            matching: find.byType(DropdownButtonFormField<PupilResponse>),
+          ),
+        );
+    expect(leftPupilField.decoration.labelText, isNull);
+    final DropdownButton<PupilResponse> leftPupilDropdown = tester
+        .widget<DropdownButton<PupilResponse>>(
+          find.descendant(
+            of: find.byKey(const Key('leftPupilInput')),
+            matching: find.byType(DropdownButton<PupilResponse>),
+          ),
+        );
+    expect(leftPupilDropdown.dropdownColor, AppColors.surface);
+    expect(leftPupilDropdown.focusColor, AppColors.infoBackground);
+    expect(leftPupilDropdown.borderRadius, BorderRadius.circular(12));
+
     await tapAssessmentKey(tester, 'glucoseToggle');
     final EditableText glucoseInput = tester.widget<EditableText>(
       find.descendant(
@@ -368,7 +543,7 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('요청 전송 중'), findsOneWidget);
     expect(find.text('1분 미응답 시 10km씩 자동 확대됩니다.'), findsOneWidget);
-    expect(find.text('10km 이내 병원에 전송 중'), findsOneWidget);
+    expect(find.byKey(const Key('currentSearchRadiusCard')), findsNothing);
     expect(find.text('한양대학교병원 응답 대기 중'), findsNothing);
     expect(find.textContaining('KTAS'), findsNothing);
     expect(find.textContaining('수락됨'), findsNothing);
@@ -398,6 +573,7 @@ void main() {
       find.byKey(const Key('confirmRequestCancellationDialog')),
       findsOneWidget,
     );
+    expect(find.text('취소하기'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const Key('confirmRequestCancellationDialog')),
@@ -426,6 +602,45 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('새 환자 등록'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('newPatientButton')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 130));
+    expect(find.text('처치 및 전송 확인'), findsNothing);
+    await tester.pumpAndSettle();
+    final ProviderContainer freshContainer = ProviderScope.containerOf(
+      tester.element(find.text('환자 기본 정보')),
+    );
+    final freshDraft = freshContainer
+        .read(patientAssessmentViewModelProvider)
+        .requireValue
+        .draft;
+    expect(freshDraft.ageStatus, isNull);
+    expect(freshDraft.sex, isNull);
+    expect(freshDraft.primarySymptom, isNull);
+    expect(freshDraft.classificationStatus, isNull);
+    expect(freshDraft.vitals, isEmpty);
+    expect(freshDraft.treatments, isEmpty);
+    expect(freshDraft.glucoseMgDl, isNull);
+
+    await completeBasicStep(tester);
+    await advanceBasicStepWithUnknownOnset(tester);
+    await completeClassificationStep(tester);
+    await tester.tap(find.byKey(const Key('assessmentNextButton')));
+    await tester.pumpAndSettle();
+    await confirmTimeSheet(tester, 'confirmAssessedAtButton');
+    await completeVitalsAsRefused(tester);
+    await tester.tap(find.byKey(const Key('assessmentNextButton')));
+    await tester.pumpAndSettle();
+    await confirmTimeSheet(tester, 'confirmMeasuredAtButton');
+    await tapAssessmentKey(tester, 'treatment_NONE');
+    await tester.tap(find.byKey(const Key('submitTransferRequestButton')));
+    await tester.pumpAndSettle();
+    await confirmTimeSheet(tester, 'confirmPerformedAtButton', settle: false);
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('요청 전송 중'), findsOneWidget);
+    expect(find.text('새 환자 등록'), findsNothing);
   });
 
   testWidgets('나이와 활력징후를 직접 입력하고 혈압 측정 상태를 다시 전환한다', (
@@ -460,7 +675,6 @@ void main() {
 
     await tapAssessmentKey(tester, 'patientSex_MALE');
     await tapAssessmentKey(tester, 'occurrenceType_DISEASE');
-    await tapAssessmentKey(tester, 'onsetTimeStatus_ESTIMATED');
     expect(find.text('10분 전'), findsNothing);
 
     await tester.tap(find.byKey(const Key('assessmentNextButton')));
@@ -469,8 +683,12 @@ void main() {
     expect(find.text('증상 발생 시각을 선택해주세요'), findsOneWidget);
     expect(find.text('5분 전'), findsOneWidget);
     expect(find.text('10분 전'), findsOneWidget);
-    expect(find.text('30분 전'), findsOneWidget);
+    expect(find.text('30분 전'), findsNothing);
     expect(find.text('1시간 전'), findsNothing);
+    expect(find.byKey(const Key('estimatedOnsetTimeButton')), findsOneWidget);
+    expect(find.byKey(const Key('unknownOnsetTimeButton')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('estimatedOnsetTimeButton')));
+    await tester.pump();
     await tester.tap(find.byKey(const Key('directClinicalTimeButton')));
     await tester.pumpAndSettle();
     expect(find.byType(CupertinoPicker), findsOneWidget);
@@ -665,8 +883,6 @@ void main() {
 
     await tapAssessmentKey(tester, 'ageStatus_UNKNOWN');
     await tapAssessmentKey(tester, 'patientSex_MALE');
-    await tapAssessmentKey(tester, 'onsetTimeStatus_UNKNOWN');
-
     final Finder nonDisease = find.byKey(
       const Key('occurrenceType_NON_DISEASE'),
     );
@@ -719,12 +935,215 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('요청 전송 중'), findsOneWidget);
-    expect(find.text('10km 이내 병원에 전송 중'), findsOneWidget);
+    expect(find.text('요청 경과 시간'), findsOneWidget);
+    expect(find.byKey(const Key('currentSearchRadiusCard')), findsNothing);
+    expect(find.text('00:00'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('00:01'), findsOneWidget);
     expect(find.byKey(const Key('hospitalSearchRadar')), findsOneWidget);
     expect(
       find.byKey(const Key('cancelTransportRequestButton')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('이송 중 기타 취소 사유는 200자 상세 입력을 요구한다', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData(useMaterial3: true),
+          home: TransportInProgressPage(
+            session: TransportSession(
+              requestId: 'REQ-IN-TRANSIT-CANCEL',
+              requestStartedAt: DateTime.now(),
+              destination: AcceptedHospital(
+                offerId: 'OFFER-1',
+                name: '테스트병원',
+                address: '서울시 테스트구',
+                emergencyRoomPhone: '02-0000-0000',
+                distanceMeters: 1000,
+                etaMinutes: 5,
+                acceptedAt: DateTime.now(),
+              ),
+              patientSummary: const PatientTransportSummary.empty(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('cancelInTransitButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('cancellationReason_OTHER')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('cancellationDetailInput')), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('confirmTransportCancellationButton')),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.enterText(
+      find.byKey(const Key('cancellationDetailInput')),
+      '현장 처치 후 이송 불필요',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('confirmTransportCancellationButton')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('이송 중 의식·Pre-KTAS·처치 기록을 추가하고 최신 상태를 표시한다', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData(useMaterial3: true),
+          home: TransportInProgressPage(
+            session: TransportSession(
+              requestId: 'REQ-IN-TRANSIT-CLINICAL',
+              requestStartedAt: DateTime.now(),
+              destination: AcceptedHospital(
+                offerId: 'OFFER-CLINICAL',
+                name: '테스트병원',
+                address: '서울시 테스트구',
+                emergencyRoomPhone: '02-0000-0000',
+                distanceMeters: 1000,
+                etaMinutes: 5,
+                acceptedAt: DateTime.now(),
+              ),
+              patientSummary: const PatientTransportSummary(
+                ageLabel: '72세',
+                sexLabel: '남성',
+                primarySymptomLabel: '호흡곤란',
+                preKtasLabel: 'Pre-KTAS 2',
+                avpuLabel: 'A',
+                preKtasStandardVersion: 'DEV_UNCONFIRMED',
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.drag(find.byType(ListView), const Offset(0, -650));
+    await tester.pump();
+
+    for (final String key in <String>[
+      'addInTransitVitalsButton',
+      'addInTransitConsciousnessButton',
+      'addInTransitPreKtasButton',
+      'addInTransitTreatmentButton',
+    ]) {
+      await tester.ensureVisible(find.byKey(Key(key)));
+      expect(find.byKey(Key(key)), findsOneWidget);
+    }
+
+    await tester.tap(find.byKey(const Key('addInTransitConsciousnessButton')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    await tester.ensureVisible(find.byKey(const Key('inTransitAvpu_V')));
+    await tester.tap(find.byKey(const Key('inTransitAvpu_V')));
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const Key('continueInTransitConsciousnessButton')),
+    );
+    await tester.tap(
+      find.byKey(const Key('continueInTransitConsciousnessButton')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(
+      find.byKey(const Key('inTransitConsciousnessTimeSheet')),
+      findsOneWidget,
+    );
+    await confirmTimeSheet(
+      tester,
+      'confirmInTransitConsciousnessTimeButton',
+      settle: false,
+    );
+    expect(find.text('V · 음성 반응'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('addInTransitPreKtasButton')),
+    );
+    await tester.tap(find.byKey(const Key('addInTransitPreKtasButton')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    await tester.tap(find.byKey(const Key('inTransitPreKtasLevel3')));
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const Key('continueInTransitPreKtasButton')),
+    );
+    await tester.tap(find.byKey(const Key('continueInTransitPreKtasButton')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(find.byKey(const Key('inTransitPreKtasTimeSheet')), findsOneWidget);
+    await confirmTimeSheet(
+      tester,
+      'confirmInTransitPreKtasTimeButton',
+      settle: false,
+    );
+    expect(find.text('3단계'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('addInTransitTreatmentButton')),
+    );
+    await tester.tap(find.byKey(const Key('addInTransitTreatmentButton')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    await tester.tap(find.byKey(const Key('inTransitTreatmentTypeDropdown')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('산소 투여').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('inTransitTreatmentResult_SUCCESS')));
+    await tester.enterText(
+      find.byKey(const Key('inTransitTreatmentField_method')),
+      '마스크',
+    );
+    await tester.enterText(
+      find.byKey(const Key('inTransitTreatmentField_flowRateLpm')),
+      '5',
+    );
+    tester.testTextInput.hide();
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const Key('continueInTransitTreatmentButton')),
+    );
+    await tester.tap(find.byKey(const Key('continueInTransitTreatmentButton')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    expect(
+      find.byKey(const Key('inTransitTreatmentTimeSheet')),
+      findsOneWidget,
+    );
+    await confirmTimeSheet(
+      tester,
+      'confirmInTransitTreatmentTimeButton',
+      settle: false,
+    );
+    await tester.ensureVisible(
+      find.byKey(const Key('latestInTransitTreatment')),
+    );
+    expect(find.byKey(const Key('latestInTransitTreatment')), findsOneWidget);
+    expect(find.text('최근 처치  산소 투여 · 성공'), findsOneWidget);
   });
 
   testWidgets('병원 수락 후 목적지를 선택하고 이송 중 활력징후를 수정한다', (WidgetTester tester) async {
@@ -944,6 +1363,7 @@ void main() {
     expect(find.text('140/90 mmHg'), findsOneWidget);
 
     expect(find.byKey(const Key('inTransitBottomAction')), findsOneWidget);
+    expect(find.byKey(const Key('cancelInTransitButton')), findsOneWidget);
     expect(find.byKey(const Key('requestHandoffButton')), findsOneWidget);
     expect(
       find.descendant(
@@ -999,7 +1419,8 @@ void main() {
 
     expect(find.text('인계 대기 중'), findsNothing);
     expect(find.byKey(const Key('handoffStatus_requested')), findsNothing);
-    expect(find.text('인계 완료'), findsNWidgets(4));
+    expect(find.text('인계 완료'), findsNWidgets(3));
+    expect(find.text('더보기 (1)'), findsOneWidget);
     statusBadge = tester.widget<Container>(
       find.descendant(
         of: currentTransport,
@@ -1036,6 +1457,21 @@ void main() {
     expect(find.text('상태 안내'), findsOneWidget);
     expect(find.text('STEP 01'), findsOneWidget);
     expect(find.text('환자 기본 정보'), findsOneWidget);
+    expect(find.text('주증상 1개 필수'), findsNothing);
+    expect(find.text('긴급 전송 사유 필수'), findsNothing);
+
+    await tester.dragUntilVisible(
+      find.byKey(const Key('appGuideStep_4')),
+      find.byType(ListView).first,
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('처치 없음은 단독 선택'), findsNothing);
+    expect(find.text('1분 미응답 시 반경 확대'), findsNothing);
+    expect(
+      find.text('병원 도착 후 인계를 요청합니다. 병원이 인계 완료를 확인하면 이송이 최종 완료됩니다.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('나중에 선택한 안내는 반복하지 않고 설정에서 다시 연다', (WidgetTester tester) async {

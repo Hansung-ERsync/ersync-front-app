@@ -6,5 +6,7 @@ abstract interface class PatientAssessmentRepository {
 
   Future<void> saveDraft(PatientAssessmentDraft draft);
 
+  Future<void> clearDraft();
+
   Future<TransferRequestReceipt> submit(PatientAssessmentDraft draft);
 }

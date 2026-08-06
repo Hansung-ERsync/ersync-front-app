@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../domain/entities/in_transit_clinical_updates.dart';
 import '../../domain/entities/in_transit_vital_update.dart';
 import '../../domain/entities/recent_transport.dart';
 import '../../domain/entities/transport_session.dart';
@@ -36,6 +37,27 @@ class MockTransportDataSource {
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
     _updates.putIfAbsent(requestId, () => <InTransitVitalUpdate>[]).add(update);
+  }
+
+  Future<void> addConsciousnessUpdate(
+    String requestId,
+    InTransitConsciousnessUpdate update,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+  }
+
+  Future<void> addPreKtasUpdate(
+    String requestId,
+    InTransitPreKtasUpdate update,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+  }
+
+  Future<void> addTreatmentUpdate(
+    String requestId,
+    InTransitTreatmentUpdate update,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 180));
   }
 
   Future<void> requestHandoff(TransportSession session) async {

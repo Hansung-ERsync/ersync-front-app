@@ -5,6 +5,7 @@ class PatientTransportSummary {
     required this.primarySymptomLabel,
     required this.preKtasLabel,
     required this.avpuLabel,
+    this.preKtasStandardVersion = 'DEV_UNCONFIRMED',
     this.systolic,
     this.diastolic,
     this.pulse,
@@ -25,6 +26,7 @@ class PatientTransportSummary {
       primarySymptomLabel = '확인 불가',
       preKtasLabel = '분류 확인 중',
       avpuLabel = '확인 불가',
+      preKtasStandardVersion = 'DEV_UNCONFIRMED',
       systolic = null,
       diastolic = null,
       pulse = null,
@@ -43,6 +45,7 @@ class PatientTransportSummary {
   final String primarySymptomLabel;
   final String preKtasLabel;
   final String avpuLabel;
+  final String preKtasStandardVersion;
   final double? systolic;
   final double? diastolic;
   final double? pulse;
@@ -90,6 +93,7 @@ class PatientTransportSummary {
       primarySymptomLabel: primarySymptomLabel,
       preKtasLabel: preKtasLabel,
       avpuLabel: avpuLabel,
+      preKtasStandardVersion: preKtasStandardVersion,
       systolic: systolic,
       diastolic: diastolic,
       pulse: pulse,
@@ -97,6 +101,37 @@ class PatientTransportSummary {
       temperature: temperature,
       oxygenSaturation: oxygenSaturation,
       vitalsMeasuredAt: measuredAt,
+      bloodPressureStateLabel: bloodPressureStateLabel,
+      pulseStateLabel: pulseStateLabel,
+      respiratoryRateStateLabel: respiratoryRateStateLabel,
+      temperatureStateLabel: temperatureStateLabel,
+      oxygenSaturationStateLabel: oxygenSaturationStateLabel,
+    );
+  }
+
+  PatientTransportSummary copyWithConsciousness({required String avpuLabel}) {
+    return _copyWith(avpuLabel: avpuLabel);
+  }
+
+  PatientTransportSummary copyWithPreKtas({required String preKtasLabel}) {
+    return _copyWith(preKtasLabel: preKtasLabel);
+  }
+
+  PatientTransportSummary _copyWith({String? preKtasLabel, String? avpuLabel}) {
+    return PatientTransportSummary(
+      ageLabel: ageLabel,
+      sexLabel: sexLabel,
+      primarySymptomLabel: primarySymptomLabel,
+      preKtasLabel: preKtasLabel ?? this.preKtasLabel,
+      avpuLabel: avpuLabel ?? this.avpuLabel,
+      preKtasStandardVersion: preKtasStandardVersion,
+      systolic: systolic,
+      diastolic: diastolic,
+      pulse: pulse,
+      respiratoryRate: respiratoryRate,
+      temperature: temperature,
+      oxygenSaturation: oxygenSaturation,
+      vitalsMeasuredAt: vitalsMeasuredAt,
       bloodPressureStateLabel: bloodPressureStateLabel,
       pulseStateLabel: pulseStateLabel,
       respiratoryRateStateLabel: respiratoryRateStateLabel,

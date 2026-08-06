@@ -14,15 +14,24 @@ class MockHospitalSearchRepository implements HospitalSearchRepository {
   }
 
   @override
-  Future<void> selectDestination(String requestId, String offerId) {
+  Future<void> selectDestination(
+    String requestId,
+    String offerId,
+    String idempotencyKey,
+  ) {
     return _dataSource.selectDestination(requestId, offerId);
+  }
+
+  @override
+  Future<void> retrySearch(String requestId, String idempotencyKey) {
+    return _dataSource.retrySearch(requestId);
   }
 
   @override
   Future<void> cancelRequest(
     String requestId,
-    TransportCancellationReason reason,
+    TransportCancellation cancellation,
   ) {
-    return _dataSource.cancelRequest(requestId, reason);
+    return _dataSource.cancelRequest(requestId, cancellation);
   }
 }

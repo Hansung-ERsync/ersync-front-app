@@ -39,6 +39,26 @@ class VitalReadingDraft {
   }
 }
 
+class TreatmentEntryDraft {
+  const TreatmentEntryDraft({
+    this.attemptResult,
+    this.details = const <String, String>{},
+  });
+
+  final TreatmentAttemptResult? attemptResult;
+  final Map<String, String> details;
+
+  TreatmentEntryDraft copyWith({
+    TreatmentAttemptResult? attemptResult,
+    Map<String, String>? details,
+  }) {
+    return TreatmentEntryDraft(
+      attemptResult: attemptResult ?? this.attemptResult,
+      details: Map<String, String>.unmodifiable(details ?? this.details),
+    );
+  }
+}
+
 class PatientAssessmentDraft {
   const PatientAssessmentDraft({
     required this.assessmentProtocolVersion,
@@ -53,9 +73,11 @@ class PatientAssessmentDraft {
     required this.ageYears,
     required this.sex,
     required this.occurrenceType,
+    required this.occurrenceDetail,
     required this.mechanism,
     required this.injurySites,
     required this.primarySymptom,
+    required this.primarySymptomDetail,
     required this.secondarySymptoms,
     required this.onsetTimeStatus,
     required this.onsetAt,
@@ -65,11 +87,13 @@ class PatientAssessmentDraft {
     required this.exceptionDetail,
     required this.avpu,
     required this.unassessableReason,
+    required this.unassessableDetail,
     required this.assessedAt,
     required this.observedAt,
     required this.vitals,
     required this.measuredAt,
     required this.treatments,
+    required this.treatmentEntries,
     required this.performedAt,
     required this.glucoseMgDl,
     required this.leftPupil,
@@ -94,9 +118,11 @@ class PatientAssessmentDraft {
   final int? ageYears;
   final PatientSex? sex;
   final OccurrenceType? occurrenceType;
+  final String occurrenceDetail;
   final InjuryMechanism? mechanism;
   final Set<InjurySite> injurySites;
   final PatientSymptom? primarySymptom;
+  final String primarySymptomDetail;
   final Set<PatientSymptom> secondarySymptoms;
   final ClinicalTimeStatus? onsetTimeStatus;
   final DateTime? onsetAt;
@@ -107,12 +133,14 @@ class PatientAssessmentDraft {
   final String exceptionDetail;
   final AvpuLevel? avpu;
   final UnassessableReason? unassessableReason;
+  final String unassessableDetail;
   final DateTime assessedAt;
   final DateTime observedAt;
 
   final Map<VitalType, VitalReadingDraft> vitals;
   final DateTime measuredAt;
   final Set<TreatmentType> treatments;
+  final Map<TreatmentType, TreatmentEntryDraft> treatmentEntries;
   final DateTime performedAt;
 
   final int? glucoseMgDl;
@@ -129,9 +157,11 @@ class PatientAssessmentDraft {
     Object? ageYears = _notProvided,
     PatientSex? sex,
     OccurrenceType? occurrenceType,
+    String? occurrenceDetail,
     Object? mechanism = _notProvided,
     Set<InjurySite>? injurySites,
     Object? primarySymptom = _notProvided,
+    String? primarySymptomDetail,
     Set<PatientSymptom>? secondarySymptoms,
     ClinicalTimeStatus? onsetTimeStatus,
     Object? onsetAt = _notProvided,
@@ -141,11 +171,13 @@ class PatientAssessmentDraft {
     String? exceptionDetail,
     Object? avpu = _notProvided,
     Object? unassessableReason = _notProvided,
+    String? unassessableDetail,
     DateTime? assessedAt,
     DateTime? observedAt,
     Map<VitalType, VitalReadingDraft>? vitals,
     DateTime? measuredAt,
     Set<TreatmentType>? treatments,
+    Map<TreatmentType, TreatmentEntryDraft>? treatmentEntries,
     DateTime? performedAt,
     Object? glucoseMgDl = _notProvided,
     Object? leftPupil = _notProvided,
@@ -170,6 +202,7 @@ class PatientAssessmentDraft {
           : ageYears as int?,
       sex: sex ?? this.sex,
       occurrenceType: occurrenceType ?? this.occurrenceType,
+      occurrenceDetail: occurrenceDetail ?? this.occurrenceDetail,
       mechanism: identical(mechanism, _notProvided)
           ? this.mechanism
           : mechanism as InjuryMechanism?,
@@ -179,6 +212,7 @@ class PatientAssessmentDraft {
       primarySymptom: identical(primarySymptom, _notProvided)
           ? this.primarySymptom
           : primarySymptom as PatientSymptom?,
+      primarySymptomDetail: primarySymptomDetail ?? this.primarySymptomDetail,
       secondarySymptoms: Set<PatientSymptom>.unmodifiable(
         secondarySymptoms ?? this.secondarySymptoms,
       ),
@@ -198,6 +232,7 @@ class PatientAssessmentDraft {
       unassessableReason: identical(unassessableReason, _notProvided)
           ? this.unassessableReason
           : unassessableReason as UnassessableReason?,
+      unassessableDetail: unassessableDetail ?? this.unassessableDetail,
       assessedAt: assessedAt ?? this.assessedAt,
       observedAt: observedAt ?? this.observedAt,
       vitals: Map<VitalType, VitalReadingDraft>.unmodifiable(
@@ -206,6 +241,9 @@ class PatientAssessmentDraft {
       measuredAt: measuredAt ?? this.measuredAt,
       treatments: Set<TreatmentType>.unmodifiable(
         treatments ?? this.treatments,
+      ),
+      treatmentEntries: Map<TreatmentType, TreatmentEntryDraft>.unmodifiable(
+        treatmentEntries ?? this.treatmentEntries,
       ),
       performedAt: performedAt ?? this.performedAt,
       glucoseMgDl: identical(glucoseMgDl, _notProvided)

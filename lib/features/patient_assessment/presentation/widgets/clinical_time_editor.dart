@@ -3,7 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../domain/entities/assessment_enums.dart';
 import 'assessment_section.dart';
+
+class OnsetTimeSelection {
+  const OnsetTimeSelection({required this.status, required this.occurredAt});
+
+  final ClinicalTimeStatus status;
+  final DateTime? occurredAt;
+}
+
+class _ClinicalTimePickerResult {
+  const _ClinicalTimePickerResult({required this.time, this.onsetStatus});
+
+  final DateTime? time;
+  final ClinicalTimeStatus? onsetStatus;
+}
 
 Future<DateTime?> showClinicalTimePickerSheet({
   required BuildContext context,
@@ -13,7 +28,7 @@ Future<DateTime?> showClinicalTimePickerSheet({
   Key? sheetKey,
   Key? confirmButtonKey,
 }) {
-  return showModalBottomSheet<DateTime>(
+  return showModalBottomSheet<_ClinicalTimePickerResult>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -28,7 +43,39 @@ Future<DateTime?> showClinicalTimePickerSheet({
       sheetKey: sheetKey,
       confirmButtonKey: confirmButtonKey,
     ),
-  );
+  ).then((_ClinicalTimePickerResult? result) => result?.time);
+}
+
+Future<OnsetTimeSelection?> showOnsetTimePickerSheet({
+  required BuildContext context,
+  required DateTime initialTime,
+  ClinicalTimeStatus? initialStatus,
+  Key? sheetKey,
+  Key? confirmButtonKey,
+}) async {
+  final _ClinicalTimePickerResult? result =
+      await showModalBottomSheet<_ClinicalTimePickerResult>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: AppColors.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (BuildContext context) => _ClinicalTimePickerSheet(
+          title: '증상 발생 시각을 선택해주세요',
+          description: '정확한 시각을 고르거나 아래에서 추정·확인 불가로 기록합니다.',
+          initialTime: initialTime,
+          initialOnsetStatus: initialStatus,
+          sheetKey: sheetKey,
+          confirmButtonKey: confirmButtonKey,
+        ),
+      );
+  final ClinicalTimeStatus? status = result?.onsetStatus;
+  if (result == null || status == null) {
+    return null;
+  }
+  return OnsetTimeSelection(status: status, occurredAt: result.time);
 }
 
 class _ClinicalTimePickerSheet extends StatefulWidget {
@@ -36,6 +83,7 @@ class _ClinicalTimePickerSheet extends StatefulWidget {
     required this.title,
     required this.initialTime,
     this.description,
+    this.initialOnsetStatus,
     this.sheetKey,
     this.confirmButtonKey,
   });
@@ -43,6 +91,7 @@ class _ClinicalTimePickerSheet extends StatefulWidget {
   final String title;
   final String? description;
   final DateTime initialTime;
+  final ClinicalTimeStatus? initialOnsetStatus;
   final Key? sheetKey;
   final Key? confirmButtonKey;
 
@@ -58,12 +107,16 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
   late FixedExtentScrollController _periodController;
   late int _periodIndex;
   bool _showDirectInput = false;
+  ClinicalTimeStatus? _onsetStatus;
   String? _inputError;
 
   @override
   void initState() {
     super.initState();
     _selectedTime = widget.initialTime;
+    _onsetStatus = widget.initialOnsetStatus == ClinicalTimeStatus.unknown
+        ? ClinicalTimeStatus.unknown
+        : widget.initialOnsetStatus ?? ClinicalTimeStatus.exact;
     _periodIndex = widget.initialTime.hour >= 12 ? 1 : 0;
     _periodController = FixedExtentScrollController(initialItem: _periodIndex);
     _hourController = TextEditingController(
@@ -84,6 +137,10 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isOnsetMode =
+        widget.initialOnsetStatus != null || widget.title == '증상 발생 시각을 선택해주세요';
+    final bool isUnknown =
+        isOnsetMode && _onsetStatus == ClinicalTimeStatus.unknown;
     return AnimatedPadding(
       duration: const Duration(milliseconds: 180),
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -132,7 +189,9 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Text(
-                formatClinicalTime(_selectedTime),
+                isUnknown
+                    ? '증상 발생 시각 확인 불가'
+                    : formatClinicalTime(_selectedTime),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: AppColors.primary,
@@ -141,35 +200,78 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
               ),
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            Row(
               children: <Widget>[
-                _TimeOptionButton(
-                  label: '지금',
-                  onPressed: () => _selectQuick(Duration.zero),
+                Expanded(
+                  child: _TimeOptionButton(
+                    label: '지금',
+                    onPressed: () => _selectQuick(Duration.zero),
+                  ),
                 ),
-                _TimeOptionButton(
-                  label: '5분 전',
-                  onPressed: () => _selectQuick(const Duration(minutes: 5)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _TimeOptionButton(
+                    label: '5분 전',
+                    onPressed: () => _selectQuick(const Duration(minutes: 5)),
+                  ),
                 ),
-                _TimeOptionButton(
-                  label: '10분 전',
-                  onPressed: () => _selectQuick(const Duration(minutes: 10)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _TimeOptionButton(
+                    label: '10분 전',
+                    onPressed: () => _selectQuick(const Duration(minutes: 10)),
+                  ),
                 ),
-                _TimeOptionButton(
-                  label: '30분 전',
-                  onPressed: () => _selectQuick(const Duration(minutes: 30)),
-                ),
-                _TimeOptionButton(
-                  key: const Key('directClinicalTimeButton'),
-                  label: '직접 선택',
-                  icon: Icons.edit_rounded,
-                  selected: _showDirectInput,
-                  onPressed: _openDirectInput,
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _TimeOptionButton(
+                    key: const Key('directClinicalTimeButton'),
+                    label: '직접 선택',
+                    selected: _showDirectInput,
+                    onPressed: _openDirectInput,
+                  ),
                 ),
               ],
             ),
+            if (isOnsetMode) ...<Widget>[
+              const SizedBox(height: 18),
+              const Text(
+                '시각을 정확히 알 수 없나요?',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: _TimeStatusButton(
+                      key: const Key('estimatedOnsetTimeButton'),
+                      label: '추정 시각',
+                      icon: Icons.approval_outlined,
+                      selected: _onsetStatus == ClinicalTimeStatus.estimated,
+                      onPressed: () => setState(() {
+                        _onsetStatus = ClinicalTimeStatus.estimated;
+                        _showDirectInput = false;
+                        _inputError = null;
+                      }),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _TimeStatusButton(
+                      key: const Key('unknownOnsetTimeButton'),
+                      label: '확인 불가',
+                      icon: Icons.help_outline_rounded,
+                      selected: _onsetStatus == ClinicalTimeStatus.unknown,
+                      onPressed: () => setState(() {
+                        _onsetStatus = ClinicalTimeStatus.unknown;
+                        _showDirectInput = false;
+                        _inputError = null;
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               child: !_showDirectInput
@@ -189,7 +291,7 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
                     widget.confirmButtonKey ??
                     const Key('applyClinicalTimeButton'),
                 onPressed: _apply,
-                child: const Text('이 시간으로 적용'),
+                child: Text(isUnknown ? '확인 불가로 적용' : '이 시간으로 적용'),
               ),
             ),
           ],
@@ -305,6 +407,9 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
   void _selectQuick(Duration offset) {
     setState(() {
       _selectedTime = DateTime.now().subtract(offset);
+      if (_onsetStatus == ClinicalTimeStatus.unknown) {
+        _onsetStatus = ClinicalTimeStatus.exact;
+      }
       _showDirectInput = false;
       _inputError = null;
     });
@@ -313,15 +418,29 @@ class _ClinicalTimePickerSheetState extends State<_ClinicalTimePickerSheet> {
   void _openDirectInput() {
     setState(() {
       _showDirectInput = true;
+      if (_onsetStatus == ClinicalTimeStatus.unknown) {
+        _onsetStatus = ClinicalTimeStatus.exact;
+      }
       _inputError = null;
     });
   }
 
   void _apply() {
+    if (_onsetStatus == ClinicalTimeStatus.unknown) {
+      Navigator.of(context).pop(
+        const _ClinicalTimePickerResult(
+          time: null,
+          onsetStatus: ClinicalTimeStatus.unknown,
+        ),
+      );
+      return;
+    }
     if (_showDirectInput && !_updateFromDirectInput()) {
       return;
     }
-    Navigator.of(context).pop(_selectedTime);
+    Navigator.of(context).pop(
+      _ClinicalTimePickerResult(time: _selectedTime, onsetStatus: _onsetStatus),
+    );
   }
 
   bool _updateFromDirectInput() {
@@ -364,21 +483,17 @@ class _TimeOptionButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
-    this.icon = Icons.history_rounded,
     this.selected = false,
   });
 
   final String label;
   final VoidCallback onPressed;
-  final IconData icon;
   final bool selected;
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
+    return OutlinedButton(
       onPressed: onPressed,
-      icon: Icon(icon, size: 17),
-      label: Text(label),
       style: OutlinedButton.styleFrom(
         foregroundColor: selected ? AppColors.textOnDark : AppColors.primary,
         backgroundColor: selected ? AppColors.primary : AppColors.surface,
@@ -386,7 +501,40 @@ class _TimeOptionButton extends StatelessWidget {
           color: selected ? AppColors.primary : AppColors.border,
         ),
         minimumSize: const Size(0, 44),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+      ),
+      child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, maxLines: 1)),
+    );
+  }
+}
+
+class _TimeStatusButton extends StatelessWidget {
+  const _TimeStatusButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: selected ? AppColors.textOnDark : AppColors.primary,
+        backgroundColor: selected ? AppColors.primary : AppColors.surface,
+        side: BorderSide(
+          color: selected ? AppColors.primary : AppColors.border,
+        ),
+        minimumSize: const Size(0, 48),
       ),
     );
   }

@@ -127,6 +127,21 @@ class BasicInformationStep extends StatelessWidget {
                     )
                     .toList(),
               ),
+              if (draft.occurrenceType == OccurrenceType.other) ...<Widget>[
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const Key('occurrenceDetailInput'),
+                  initialValue: draft.occurrenceDetail,
+                  maxLength: 200,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: '기타 발생 유형 상세',
+                    hintText: '발생 상황을 입력해주세요',
+                  ),
+                  onChanged: viewModel.setOccurrenceDetail,
+                ),
+              ],
             ],
           ),
         ),
@@ -225,75 +240,6 @@ class BasicInformationStep extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 28),
-        AssessmentValidationSection(
-          target: AssessmentValidationTarget.onsetAt,
-          activeTarget: validationTarget,
-          message: validationMessage,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const AssessmentSectionTitle(title: '증상 발생 시각'),
-              const SizedBox(height: 10),
-              Row(
-                children: ClinicalTimeStatus.values
-                    .expand(
-                      (ClinicalTimeStatus value) => <Widget>[
-                        Expanded(
-                          child: AssessmentChoice(
-                            key: Key('onsetTimeStatus_${value.apiValue}'),
-                            label: value.label,
-                            selected: draft.onsetTimeStatus == value,
-                            selectedColor: value == ClinicalTimeStatus.unknown
-                                ? AppColors.statusUnavailable
-                                : AppColors.primary,
-                            onTap: () => viewModel.setOnsetTimeStatus(value),
-                          ),
-                        ),
-                        if (value != ClinicalTimeStatus.values.last)
-                          const SizedBox(width: 8),
-                      ],
-                    )
-                    .toList(),
-              ),
-              if (draft.onsetTimeStatus != null &&
-                  draft.onsetTimeStatus !=
-                      ClinicalTimeStatus.unknown) ...<Widget>[
-                const SizedBox(height: 12),
-                const _NextTimeNotice(text: '다음을 누르면 증상 발생 시각을 선택합니다.'),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _NextTimeNotice extends StatelessWidget {
-  const _NextTimeNotice({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        const Icon(
-          Icons.keyboard_arrow_up_rounded,
-          color: AppColors.statusInfo,
-          size: 20,
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
-        ),
       ],
     );
   }

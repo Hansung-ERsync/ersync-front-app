@@ -26,6 +26,16 @@ class MockHospitalSearchDataSource {
       requestId: session.requestId,
       currentRadiusKm: currentRadiusKm,
       elapsedSeconds: elapsedSeconds,
+      expansionRemainingSeconds:
+          session.expansionIntervalSeconds -
+          (elapsedSeconds % session.expansionIntervalSeconds),
+      nextExpansionAt: DateTime.now().add(
+        Duration(
+          seconds:
+              session.expansionIntervalSeconds -
+              (elapsedSeconds % session.expansionIntervalSeconds),
+        ),
+      ),
       acceptedHospitals: elapsedSeconds < 5
           ? const <AcceptedHospital>[]
           : <AcceptedHospital>[
@@ -46,11 +56,17 @@ class MockHospitalSearchDataSource {
     await Future<void>.delayed(const Duration(milliseconds: 180));
   }
 
+  Future<void> retrySearch(String requestId) async {
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+  }
+
   Future<void> cancelRequest(
     String requestId,
-    TransportCancellationReason reason,
+    TransportCancellation cancellation,
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
-    _cancelledRequestIds.add('$requestId:${reason.apiValue}');
+    _cancelledRequestIds.add(
+      '$requestId:${cancellation.reason.apiValue}:${cancellation.normalizedDetail ?? ''}',
+    );
   }
 }

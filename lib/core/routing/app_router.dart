@@ -11,17 +11,27 @@ import '../../features/hospital_search/presentation/pages/hospital_search_page.d
 import '../../features/patient_assessment/presentation/pages/patient_assessment_page.dart';
 import '../../features/settings/presentation/pages/app_guide_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
+import '../../features/splash/presentation/pages/splash_page.dart';
 import '../../features/transport/domain/entities/transport_session.dart';
 import '../../features/transport/presentation/pages/transport_in_progress_page.dart';
 
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
   final GoRouter router = GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/splash',
     routes: <RouteBase>[
+      GoRoute(
+        path: '/splash',
+        name: 'splash',
+        builder: (context, state) => const SplashPage(),
+      ),
       GoRoute(
         path: '/login',
         name: 'login',
-        builder: (context, state) => const LoginPage(),
+        builder: (context, state) => LoginPage(
+          initialErrorMessage: state.extra is String
+              ? state.extra! as String
+              : null,
+        ),
       ),
       GoRoute(
         path: '/sign-up/code',

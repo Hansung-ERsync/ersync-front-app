@@ -42,7 +42,7 @@ class MockAuthDataSource {
   Future<InvitationInfo> validateInvitationCode(String code) async {
     await _delay();
 
-    final String normalizedCode = code.trim().toUpperCase();
+    final String normalizedCode = code.trim();
     final _MockInvitationRecord? invitation = _invitations[normalizedCode];
 
     if (invitation == null) {

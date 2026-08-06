@@ -4,9 +4,15 @@ import '../../domain/entities/patient_assessment_draft.dart';
 import '../../domain/entities/transfer_request_receipt.dart';
 
 class MockPatientAssessmentDataSource {
-  MockPatientAssessmentDataSource({required this.callbackContact});
+  MockPatientAssessmentDataSource({
+    required this.callbackContact,
+    this.assessmentProtocolVersion = 'ERSYNC_MVP_1.0',
+    this.preKtasStandardVersion = 'DEV_UNCONFIRMED',
+  });
 
   final String callbackContact;
+  final String assessmentProtocolVersion;
+  final String preKtasStandardVersion;
   PatientAssessmentDraft? _savedDraft;
   final List<PatientAssessmentDraft> _submittedRequests =
       <PatientAssessmentDraft>[];
@@ -19,6 +25,11 @@ class MockPatientAssessmentDataSource {
   Future<void> saveDraft(PatientAssessmentDraft draft) async {
     await _delay();
     _savedDraft = draft;
+  }
+
+  Future<void> clearDraft() async {
+    await _delay();
+    _savedDraft = null;
   }
 
   Future<TransferRequestReceipt> submit(PatientAssessmentDraft draft) async {
@@ -54,21 +65,23 @@ class MockPatientAssessmentDataSource {
   PatientAssessmentDraft _sampleDraft() {
     final DateTime now = DateTime.now();
     return PatientAssessmentDraft(
-      assessmentProtocolVersion: 'ERSYNC_MVP_1.0',
-      preKtasStandardVersion: 'PRE_KTAS_DEV_UNCONFIRMED',
+      assessmentProtocolVersion: assessmentProtocolVersion,
+      preKtasStandardVersion: preKtasStandardVersion,
       clientRequestKey: 'mock-${now.microsecondsSinceEpoch}',
       sceneAddress: '서울 강동구 천호대로 892',
       latitude: 37.5386,
       longitude: 127.1238,
-      locationSource: 'GPS 확인',
+      locationSource: 'GPS',
       callbackContact: callbackContact,
       ageStatus: null,
       ageYears: null,
       sex: null,
       occurrenceType: null,
+      occurrenceDetail: '',
       mechanism: null,
       injurySites: const <InjurySite>{},
       primarySymptom: null,
+      primarySymptomDetail: '',
       secondarySymptoms: const <PatientSymptom>{},
       onsetTimeStatus: null,
       onsetAt: null,
@@ -78,11 +91,13 @@ class MockPatientAssessmentDataSource {
       exceptionDetail: '',
       avpu: null,
       unassessableReason: null,
+      unassessableDetail: '',
       assessedAt: now,
       observedAt: now,
       vitals: const <VitalType, VitalReadingDraft>{},
       measuredAt: now,
       treatments: const <TreatmentType>{},
+      treatmentEntries: const <TreatmentType, TreatmentEntryDraft>{},
       performedAt: now,
       glucoseMgDl: null,
       leftPupil: null,

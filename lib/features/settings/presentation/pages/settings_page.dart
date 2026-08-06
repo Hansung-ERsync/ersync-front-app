@@ -117,8 +117,11 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 40),
           OutlinedButton(
             key: const Key('signOutButton'),
-            onPressed: () {
-              ref.read(authViewModelProvider.notifier).signOut();
+            onPressed: () async {
+              await ref.read(authViewModelProvider.notifier).signOut();
+              if (!context.mounted) {
+                return;
+              }
               context.goNamed('login');
             },
             child: const Text('로그아웃'),

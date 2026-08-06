@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
-import '../../data/datasources/mock_auth_data_source.dart';
 import '../providers/auth_view_model.dart';
 import '../widgets/auth_step_page.dart';
 
@@ -101,7 +100,7 @@ class _SignUpCodePageState extends ConsumerState<SignUpCodePage> {
             TextFormField(
               key: const Key('invitationCodeField'),
               controller: _codeController,
-              textCapitalization: TextCapitalization.characters,
+              textCapitalization: TextCapitalization.none,
               textInputAction: TextInputAction.done,
               autocorrect: false,
               enableSuggestions: false,
@@ -114,59 +113,11 @@ class _SignUpCodePageState extends ConsumerState<SignUpCodePage> {
                 if (value == null || value.trim().isEmpty) {
                   return '가입 코드를 입력해주세요';
                 }
+                if (value.trim().length > 200) {
+                  return '가입 코드는 200자 이하로 입력해주세요';
+                }
                 return null;
               },
-            ),
-            const SizedBox(height: 24),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                color: AppColors.infoBackground,
-                borderRadius: BorderRadius.all(Radius.circular(12)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Icon(
-                    Icons.science_outlined,
-                    color: AppColors.statusInfo,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          '목 데이터 테스트 코드',
-                          style: Theme.of(context).textTheme.labelLarge
-                              ?.copyWith(
-                                color: AppColors.statusInfo,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        const SelectableText(
-                          MockAuthDataSource.mockInvitationCode,
-                          style: TextStyle(
-                            color: AppColors.textSecondary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    key: const Key('fillMockInvitationCodeButton'),
-                    onPressed: () {
-                      _codeController.text =
-                          MockAuthDataSource.mockInvitationCode;
-                    },
-                    child: const Text('입력'),
-                  ),
-                ],
-              ),
             ),
           ],
         ),

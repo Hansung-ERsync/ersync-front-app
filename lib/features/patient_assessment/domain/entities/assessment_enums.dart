@@ -210,6 +210,18 @@ enum TreatmentType {
   final String apiValue;
 }
 
+enum TreatmentAttemptResult {
+  success('성공', 'SUCCESS'),
+  failure('실패', 'FAILURE'),
+  ongoing('진행 중', 'ONGOING'),
+  notApplicable('해당 없음', 'NOT_APPLICABLE');
+
+  const TreatmentAttemptResult(this.label, this.apiValue);
+
+  final String label;
+  final String apiValue;
+}
+
 enum PupilResponse {
   normal('정상'),
   sluggish('둔함'),

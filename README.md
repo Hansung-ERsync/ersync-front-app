@@ -35,7 +35,8 @@ Flutter 모바일 앱을 관리합니다.
 - 로그인 화면
 - 로그인 입력값 검증
 - 가입 코드 확인 및 구급대원 계정 생성
-- 목 Repository 기반 로그인 및 회원가입
+- 실제 API 기반 가입 코드 확인·회원가입·로그인·토큰 갱신·내 프로필 조회
+- Access·Refresh Token 보안 저장과 만료 Access Token 1회 자동 갱신
 - 구급대원 홈과 최근 이송 목록
 - 완료 상태 배지
 - 계정 정보 확인 및 로그아웃
@@ -75,13 +76,13 @@ Flutter 모바일 앱을 관리합니다.
 | 아키텍처 | Feature-first Clean Architecture |
 | 상태 관리 및 의존성 주입 | Riverpod |
 | 화면 이동 | go_router |
-| REST API 통신 | Dio |
-| 데이터 모델 | freezed, json_serializable |
+| REST API 통신 | Dio + Retrofit |
+| 데이터 모델 | json_serializable 기반 요청·응답 DTO |
 | 인증 정보 저장 | flutter_secure_storage |
 | 일반 설정 저장 | shared_preferences |
 | Android | Kotlin, Gradle Kotlin DSL, Java 17 |
 | iOS | Swift, Xcode |
-| 테스트 | flutter_test, mocktail, integration_test |
+| 테스트 | flutter_test, Dio HttpClientAdapter Fake |
 
 
 ## 프로젝트 구조 원칙
@@ -113,7 +114,7 @@ ersync-front-app/
 │   │   ├── constants/               # 공통 상수
 │   │   ├── error/                   # 예외와 실패 모델
 │   │   ├── location/                # GPS 권한과 위치 수집
-│   │   ├── network/                 # Dio 클라이언트와 인터셉터
+│   │   ├── network/                 # Dio 설정, 토큰 API·인터셉터와 공통 DTO
 │   │   ├── notifications/           # 푸시 및 로컬 알림
 │   │   ├── realtime/                # 실시간 연결과 재연결
 │   │   ├── routing/                 # go_router 라우팅
@@ -142,8 +143,10 @@ ersync-front-app/
 ```text
 features/<feature>/
 ├── data/
-│   ├── datasources/                 # 원격 API와 로컬 데이터 소스
-│   ├── models/                      # JSON DTO 및 변환 모델
+│   ├── apis/                        # 기능별 Retrofit API 인터페이스
+│   ├── datasources/                 # 로컬 또는 비-HTTP 데이터 소스
+│   ├── mappers/                     # API DTO와 domain 엔티티 변환
+│   ├── models/                      # JSON 요청·응답 DTO
 │   └── repositories/                # domain 저장소 구현
 ├── domain/
 │   ├── entities/                    # 비즈니스 엔티티
@@ -174,6 +177,7 @@ flutter doctor
 
 ```bash
 flutter pub get
+dart run build_runner build --delete-conflicting-outputs
 ```
 
 ### 3. 기기 확인 및 앱 실행
@@ -186,13 +190,17 @@ flutter run -d <device-id>
 기기가 하나만 연결되어 있다면 다음 명령어로 바로 실행할 수 있습니다.
 
 ```bash
-flutter run
+flutter run --dart-define=ERSYNC_API_BASE_URL=http://13.124.194.249
 ```
 
-## 목 데이터
+- Debug·Profile은 현재 Dev HTTP API 연결을 허용합니다.
+- Release는 `ERSYNC_API_BASE_URL`에 HTTPS 주소를 전달하지 않으면 실행하지 않습니다.
+- Dev HTTP 환경에서는 실제 개인정보가 아닌 테스트 계정과 가짜 연락처만 사용합니다.
 
-백엔드 API 연결 전 화면 흐름을 확인할 수 있도록 앱 실행 중에만 유지되는
-목 Repository를 사용합니다. Hot restart 또는 앱 재실행 시 초기화됩니다.
+## 테스트 목 데이터
+
+위젯 테스트와 아직 API를 연결하지 않은 이송 기능은 메모리 목 Repository를
+사용합니다. 일반 앱 실행의 인증·프로필 기능은 실제 API Repository를 사용합니다.
 
 | 구분 | 값 |
 | --- | --- |
@@ -218,4 +226,10 @@ flutter test
 
 ```bash
 dart format lib test
+```
+
+Retrofit API나 JSON DTO를 변경한 뒤에는 생성 코드를 다시 갱신합니다.
+
+```bash
+dart run build_runner build --delete-conflicting-outputs
 ```

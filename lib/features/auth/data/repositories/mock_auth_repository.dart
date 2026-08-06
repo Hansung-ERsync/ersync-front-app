@@ -41,4 +41,10 @@ class MockAuthRepository implements AuthRepository {
   Future<InvitationInfo> validateInvitationCode(String code) {
     return _dataSource.validateInvitationCode(code);
   }
+
+  @override
+  Future<AuthUser?> restoreSession() async => null;
+
+  @override
+  Future<void> signOut() async {}
 }

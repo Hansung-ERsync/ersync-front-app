@@ -5,7 +5,7 @@ class SelectTransportDestination {
 
   final HospitalSearchRepository _repository;
 
-  Future<void> call(String requestId, String offerId) {
-    return _repository.selectDestination(requestId, offerId);
+  Future<void> call(String requestId, String offerId, String idempotencyKey) {
+    return _repository.selectDestination(requestId, offerId, idempotencyKey);
   }
 }

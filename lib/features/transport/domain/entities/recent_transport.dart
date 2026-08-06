@@ -1,4 +1,4 @@
-enum HandoffStatus { requested, completed }
+enum HandoffStatus { requested, completed, cancelled }
 
 class RecentTransport {
   const RecentTransport({
@@ -9,9 +9,14 @@ class RecentTransport {
   });
 
   final String requestId;
-  final String hospitalName;
+  final String? hospitalName;
   final DateTime statusUpdatedAt;
   final HandoffStatus handoffStatus;
+
+  String get hospitalDisplayName =>
+      hospitalName?.trim().isNotEmpty == true ? hospitalName!.trim() : '목적지 미정';
+
+  bool get hasDestination => hospitalName?.trim().isNotEmpty == true;
 
   RecentTransport copyWith({
     DateTime? statusUpdatedAt,

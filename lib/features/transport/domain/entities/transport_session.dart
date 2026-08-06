@@ -7,10 +7,15 @@ class TransportSession {
     required this.requestStartedAt,
     required this.destination,
     required this.patientSummary,
+    this.requestStatus = 'EN_ROUTE',
   });
 
   final String requestId;
   final DateTime requestStartedAt;
   final AcceptedHospital destination;
   final PatientTransportSummary patientSummary;
+  final String requestStatus;
+
+  bool get canSendLocation => requestStatus == 'EN_ROUTE';
+  bool get isHandoffPending => requestStatus == 'HANDOFF_REQUESTED';
 }

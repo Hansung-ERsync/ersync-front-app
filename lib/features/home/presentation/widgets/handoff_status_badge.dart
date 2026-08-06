@@ -11,26 +11,38 @@ class HandoffStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool isCompleted = status == HandoffStatus.completed;
+    final bool isCancelled = status == HandoffStatus.cancelled;
+    final Color backgroundColor = isCancelled
+        ? AppColors.negativeBackground
+        : isCompleted
+        ? AppColors.positiveBadgeBackground
+        : AppColors.checkingBackground;
+    final Color borderColor = isCancelled
+        ? AppColors.negativeBorder
+        : isCompleted
+        ? AppColors.positiveBorder
+        : AppColors.checkingBorder;
+    final Color foregroundColor = isCancelled
+        ? AppColors.statusNegative
+        : isCompleted
+        ? AppColors.statusPositive
+        : AppColors.statusChecking;
     return Container(
       key: Key('handoffStatus_${status.name}'),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: isCompleted
-            ? AppColors.positiveBadgeBackground
-            : AppColors.checkingBackground,
-        border: Border.all(
-          color: isCompleted
-              ? AppColors.positiveBorder
-              : AppColors.checkingBorder,
-        ),
+        color: backgroundColor,
+        border: Border.all(color: borderColor),
         borderRadius: const BorderRadius.all(Radius.circular(10)),
       ),
       child: Text(
-        isCompleted ? '인계 완료' : '인계 대기 중',
+        isCancelled
+            ? '이송 취소'
+            : isCompleted
+            ? '인계 완료'
+            : '인계 대기 중',
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: isCompleted
-              ? AppColors.statusPositive
-              : AppColors.statusChecking,
+          color: foregroundColor,
           fontWeight: FontWeight.w700,
         ),
       ),

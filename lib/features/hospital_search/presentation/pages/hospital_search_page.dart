@@ -5,10 +5,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../transport/domain/entities/transport_session.dart';
+import '../../../patient_assessment/presentation/providers/patient_assessment_view_model.dart';
 import '../../domain/entities/accepted_hospital.dart';
 import '../../domain/entities/hospital_search_progress.dart';
 import '../../domain/entities/hospital_search_session.dart';
 import '../providers/hospital_search_view_model.dart';
+import '../widgets/transport_cancellation_sheet.dart';
 
 class HospitalSearchPage extends ConsumerStatefulWidget {
   const HospitalSearchPage({super.key, required this.session});
@@ -19,27 +21,50 @@ class HospitalSearchPage extends ConsumerStatefulWidget {
   ConsumerState<HospitalSearchPage> createState() => _HospitalSearchPageState();
 }
 
-class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
+class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
+    with WidgetsBindingObserver {
   late final HospitalSearchViewModel _viewModel;
+  bool _isLeavingCancelledRequest = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _viewModel = ref.read(hospitalSearchViewModelProvider.notifier);
     Future<void>.microtask(() => _viewModel.start(widget.session));
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _viewModel.stop();
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _viewModel.resume();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _viewModel.pause();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final HospitalSearchViewState state = ref.watch(
+    final HospitalSearchViewState observedState = ref.watch(
       hospitalSearchViewModelProvider,
     );
+    // The provider is shared across routes. Ignore a previous request's state
+    // until start() installs this page's request, especially its cancelled flag.
+    final HospitalSearchViewState state =
+        observedState.session?.requestId == widget.session.requestId
+        ? observedState
+        : const HospitalSearchViewState();
     final HospitalSearchProgress progress =
         state.progress ??
         HospitalSearchProgress(
@@ -48,8 +73,38 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
           elapsedSeconds: 0,
         );
 
+    if (state.isCancelled) {
+      _scheduleCancelledRequestExit();
+      return const Scaffold(
+        backgroundColor: AppColors.surface,
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.check_circle_outline_rounded,
+                  size: 44,
+                  color: AppColors.statusPositive,
+                ),
+                SizedBox(height: 14),
+                Text(
+                  '요청 취소 완료',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (progress.acceptedHospitals.isNotEmpty) {
       return _buildAcceptedHospitalsScreen(state, progress);
+    }
+
+    if (progress.isExhausted) {
+      return _buildExhaustedScreen(state, progress);
     }
 
     return PopScope(
@@ -76,6 +131,14 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
                               style: Theme.of(context).textTheme.headlineSmall
                                   ?.copyWith(fontWeight: FontWeight.w800),
                             ),
+                            const SizedBox(height: 14),
+                            const Text(
+                              '요청 경과 시간',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             const SizedBox(height: 12),
                             Text(
                               _formatElapsed(progress.elapsedSeconds),
@@ -88,18 +151,16 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
                             ),
                             const SizedBox(height: 14),
                             Text(
-                              '${_formatMinutes(widget.session.expansionIntervalSeconds)} 미응답 시 '
-                              '${widget.session.radiusStepKm}km씩 자동 확대됩니다.',
+                              progress.candidateShortage
+                                  ? '현재 범위의 병원 수가 부족해 다음 범위로 확대하고 있습니다.'
+                                  : '${_formatMinutes(widget.session.expansionIntervalSeconds)} 미응답 시 '
+                                        '${widget.session.radiusStepKm}km씩 자동 확대됩니다.',
                               textAlign: TextAlign.center,
                               style: const TextStyle(
                                 color: AppColors.textTertiary,
                                 fontSize: 15,
                                 height: 1.45,
                               ),
-                            ),
-                            const SizedBox(height: 28),
-                            _SearchRadiusCard(
-                              currentRadiusKm: progress.currentRadiusKm,
                             ),
                             if (state.errorMessage != null) ...<Widget>[
                               const SizedBox(height: 14),
@@ -156,6 +217,116 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
         ),
       ),
     );
+  }
+
+  Widget _buildExhaustedScreen(
+    HospitalSearchViewState state,
+    HospitalSearchProgress progress,
+  ) {
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: AppColors.surface,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
+            child: Column(
+              children: <Widget>[
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          SizedBox(
+                            width: double.infinity,
+                            child: Text(
+                              '응답 가능한 병원을 찾지 못했습니다',
+                              key: const Key('hospitalSearchExhaustedTitle'),
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            _exhaustionMessage(progress.exhaustionReason),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              height: 1.5,
+                            ),
+                          ),
+                          if (state.errorMessage != null) ...<Widget>[
+                            const SizedBox(height: 14),
+                            Text(
+                              state.errorMessage!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: AppColors.statusNegative,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: FilledButton.icon(
+                    key: const Key('retryHospitalSearchButton'),
+                    onPressed: state.isRetrying ? null : _viewModel.retrySearch,
+                    icon: state.isRetrying
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: AppColors.textOnDark,
+                            ),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                    label: const Text(
+                      '현재 위치에서 다시 검색',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: OutlinedButton(
+                    key: const Key('cancelExhaustedTransportButton'),
+                    onPressed: state.isRetrying ? null : _openCancellationSheet,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.statusNegative,
+                    ),
+                    child: const Text(
+                      '요청 취소',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _exhaustionMessage(String? reason) {
+    return switch (reason) {
+      'NO_CANDIDATES' => '현재 위치와 조건으로 연락 가능한 병원이 없습니다. 위치를 다시 확인한 뒤 재검색해주세요.',
+      'ALL_REJECTED' => '검색 범위의 병원이 모두 수용을 거절했습니다. 현재 위치에서 새 검색을 시작할 수 있습니다.',
+      'NO_RESPONSE_INCLUDED' =>
+        '검색 범위의 병원에 모두 요청했지만 수락 응답이 없습니다. 현재 위치에서 새 검색을 시작할 수 있습니다.',
+      _ => '최대 검색 범위까지 병원 응답이 없었습니다. 현재 위치에서 다시 검색할 수 있습니다.',
+    };
   }
 
   Widget _buildAcceptedHospitalsScreen(
@@ -312,7 +483,7 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
             title: '이송 요청을\n취소할까요?',
             description: '취소한 요청은 다시 진행할 수 없습니다. 계속하면 취소 사유를 선택합니다.',
             cancelLabel: '돌아가기',
-            confirmLabel: '취소 계속',
+            confirmLabel: '취소하기',
             destructive: true,
           ),
         ) ??
@@ -320,24 +491,30 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage> {
     if (!confirmed || !mounted) {
       return;
     }
-    final TransportCancellationReason? reason =
-        await showModalBottomSheet<TransportCancellationReason>(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          backgroundColor: AppColors.surface,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          builder: (_) => const _CancellationReasonSheet(),
-        );
-    if (reason == null || !mounted) {
+    final TransportCancellation? cancellation =
+        await showTransportCancellationSheet(context);
+    if (cancellation == null || !mounted) {
       return;
     }
-    final bool cancelled = await _viewModel.cancel(reason);
-    if (cancelled && mounted) {
-      context.goNamed('home');
+    await _viewModel.cancel(cancellation);
+  }
+
+  void _scheduleCancelledRequestExit() {
+    if (_isLeavingCancelledRequest) {
+      return;
     }
+    _isLeavingCancelledRequest = true;
+    final clearDraft = ref.read(clearPatientAssessmentDraftProvider);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await clearDraft.call();
+      } finally {
+        if (mounted) {
+          ref.invalidate(patientAssessmentViewModelProvider);
+          context.goNamed('home');
+        }
+      }
+    });
   }
 
   String _formatElapsed(int elapsedSeconds) {
@@ -460,65 +637,6 @@ class _RadarRing extends StatelessWidget {
             width: 1.5,
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SearchRadiusCard extends StatelessWidget {
-  const _SearchRadiusCard({required this.currentRadiusKm});
-
-  final int currentRadiusKm;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const Key('currentSearchRadiusCard'),
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.infoBackground,
-        border: Border.all(color: AppColors.infoBorder),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 46,
-            height: 46,
-            decoration: const BoxDecoration(
-              color: AppColors.surface,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.radar_rounded, color: AppColors.statusInfo),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const Text(
-                  '현재 전송 범위',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  '${currentRadiusKm}km 이내 병원에 전송 중',
-                  key: const Key('currentSearchRadiusText'),
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -850,122 +968,6 @@ class _HospitalInfoChip extends StatelessWidget {
               color: AppColors.textSecondary,
               fontSize: 12,
               fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CancellationReasonSheet extends StatefulWidget {
-  const _CancellationReasonSheet();
-
-  @override
-  State<_CancellationReasonSheet> createState() =>
-      _CancellationReasonSheetState();
-}
-
-class _CancellationReasonSheetState extends State<_CancellationReasonSheet> {
-  TransportCancellationReason? _selectedReason;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      key: const Key('transportCancellationSheet'),
-      padding: EdgeInsets.fromLTRB(
-        20,
-        12,
-        20,
-        20 + MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  '이송 요청을 취소할까요?',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                ),
-              ),
-              IconButton(
-                onPressed: Navigator.of(context).pop,
-                tooltip: '닫기',
-                icon: const Icon(Icons.close_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            '취소 후에는 같은 요청을 다시 진행할 수 없습니다. 취소 사유를 선택해주세요.',
-            style: TextStyle(color: AppColors.textSecondary, height: 1.45),
-          ),
-          const SizedBox(height: 18),
-          ...TransportCancellationReason.values.map(
-            (TransportCancellationReason reason) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Material(
-                color: _selectedReason == reason
-                    ? AppColors.negativeBackground
-                    : AppColors.surface,
-                shape: RoundedRectangleBorder(
-                  side: BorderSide(
-                    color: _selectedReason == reason
-                        ? AppColors.negativeBorder
-                        : AppColors.border,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: InkWell(
-                  key: Key('cancellationReason_${reason.apiValue}'),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => setState(() => _selectedReason = reason),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 15,
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Icon(
-                          _selectedReason == reason
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_unchecked_rounded,
-                          color: _selectedReason == reason
-                              ? AppColors.statusNegative
-                              : AppColors.textTertiary,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          reason.label,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            height: 56,
-            child: FilledButton(
-              key: const Key('confirmTransportCancellationButton'),
-              onPressed: _selectedReason == null
-                  ? null
-                  : () => Navigator.of(context).pop(_selectedReason),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.statusNegative,
-                foregroundColor: AppColors.textOnDark,
-              ),
-              child: const Text('요청 취소하기'),
             ),
           ),
         ],

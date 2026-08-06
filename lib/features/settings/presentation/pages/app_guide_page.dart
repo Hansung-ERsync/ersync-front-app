@@ -18,7 +18,6 @@ class AppGuidePage extends StatelessWidget {
         '성별과 발생 유형을 선택합니다. 비질병이면 손상 기전과 손상 부위를 추가합니다.',
         '증상 발생 시각을 정확·추정·확인 불가로 구분합니다. 다음을 누르면 실제 시각을 확인합니다.',
       ],
-      tips: <String>['손상 부위 복수 선택 가능', '모르는 값은 확인 불가'],
     ),
     _GuideStep(
       number: 2,
@@ -31,7 +30,6 @@ class AppGuidePage extends StatelessWidget {
         '분류 완료라면 Pre-KTAS 1~5단계를, 긴급 전송이라면 예외 사유를 선택합니다.',
         'AVPU를 선택하고 평가 불가라면 사유를 기록합니다. 다음을 누르면 분류·관찰 시각을 확인합니다.',
       ],
-      tips: <String>['주증상 1개 필수', '긴급 전송 사유 필수'],
     ),
     _GuideStep(
       number: 3,
@@ -44,7 +42,6 @@ class AppGuidePage extends StatelessWidget {
         '측정값은 직접 입력하거나 −/＋로 조절하고, 혈압은 수축기와 이완기를 모두 입력합니다.',
         '측정 불가는 현장 사유를 선택하고 기타라면 직접 입력합니다. 다음을 누르면 측정 시각을 확인합니다.',
       ],
-      tips: <String>['숫자 직접 입력 가능', '기타 사유 직접 입력'],
     ),
     _GuideStep(
       number: 4,
@@ -55,9 +52,9 @@ class AppGuidePage extends StatelessWidget {
       actions: <String>[
         '시행한 처치를 하나 이상 선택합니다. 이송 요청 버튼을 누르면 처치·확인 시각을 확인합니다.',
         '필요한 추가 평가를 입력합니다. 동공 반응은 입력할 경우 좌우를 모두 기록합니다.',
-        '입력을 확인하고 이송 요청을 보내면 현재 전송 반경과 경과시간을 확인할 수 있습니다.',
+        '입력을 확인하고 이송 요청을 보내면 병원 응답 상태를 확인하고, 수용 가능한 병원을 목적지로 선택해 이송을 시작합니다.',
+        '병원 도착 후 인계를 요청합니다. 병원이 인계 완료를 확인하면 이송이 최종 완료됩니다.',
       ],
-      tips: <String>['처치 없음은 단독 선택', '1분 미응답 시 반경 확대'],
     ),
   ];
 
@@ -69,7 +66,12 @@ class AppGuidePage extends StatelessWidget {
         backgroundColor: AppColors.background,
         appBar: AppBar(
           centerTitle: true,
-          title: const Text('앱 사용법'),
+          title: Text(
+            '앱 사용법',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
           bottom: const TabBar(
             tabs: <Widget>[
               Tab(text: '환자 평가'),
@@ -162,6 +164,7 @@ class _GuideStepCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      key: Key('appGuideStep_${step.number}'),
       decoration: BoxDecoration(
         color: AppColors.surface,
         border: Border.all(color: AppColors.border),
@@ -208,35 +211,6 @@ class _GuideStepCard extends StatelessWidget {
             ),
           ),
           _GuideImage(step: step),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: step.tips
-                  .map(
-                    (String tip) => Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceMuted,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                      child: Text(
-                        tip,
-                        style: const TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
         ],
       ),
     );
@@ -543,7 +517,6 @@ class _GuideStep {
     required this.assetPath,
     required this.placeholderIcon,
     required this.actions,
-    required this.tips,
   });
 
   final int number;
@@ -552,5 +525,4 @@ class _GuideStep {
   final String assetPath;
   final IconData placeholderIcon;
   final List<String> actions;
-  final List<String> tips;
 }

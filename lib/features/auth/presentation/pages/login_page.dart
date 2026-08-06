@@ -7,12 +7,34 @@ import '../providers/auth_view_model.dart';
 import '../widgets/login_brand.dart';
 import '../widgets/login_form.dart';
 
-class LoginPage extends ConsumerWidget {
-  const LoginPage({super.key});
+class LoginPage extends ConsumerStatefulWidget {
+  const LoginPage({super.key, this.initialErrorMessage});
+
+  final String? initialErrorMessage;
+
+  @override
+  ConsumerState<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends ConsumerState<LoginPage> {
+  @override
+  void initState() {
+    super.initState();
+    final String? message = widget.initialErrorMessage;
+    if (message != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
+      });
+    }
+  }
 
   Future<void> _signIn(
     BuildContext context,
-    WidgetRef ref,
     String username,
     String password,
   ) async {
@@ -37,7 +59,7 @@ class LoginPage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final AuthState authState = ref.watch(authViewModelProvider);
 
     return Scaffold(
@@ -66,9 +88,10 @@ class LoginPage extends ConsumerWidget {
                       const SizedBox(height: 64),
                       LoginForm(
                         initialUsername: authState.registeredUsername ?? '',
-                        isLoading: authState.isLoading,
+                        isLoading:
+                            authState.isLoading || authState.isRestoringSession,
                         onSubmit: (String username, String password) =>
-                            _signIn(context, ref, username, password),
+                            _signIn(context, username, password),
                         onSignUp: () {
                           ref
                               .read(authViewModelProvider.notifier)

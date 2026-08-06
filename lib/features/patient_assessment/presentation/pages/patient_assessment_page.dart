@@ -264,6 +264,7 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
           ? 'Pre-KTAS ${draft.preKtasLevel ?? '-'}'
           : '긴급 전송',
       avpuLabel: draft.avpu?.apiValue ?? '확인 불가',
+      preKtasStandardVersion: draft.preKtasStandardVersion,
       systolic: bloodPressure?.value,
       diastolic: bloodPressure?.secondaryValue,
       pulse: draft.vitals[VitalType.pulse]?.value,
@@ -307,8 +308,18 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
   }
 
   Future<bool> _confirmStepTime(BuildContext context) async {
-    if (state.step == 0 &&
-        state.draft.onsetTimeStatus == ClinicalTimeStatus.unknown) {
+    if (state.step == 0) {
+      final OnsetTimeSelection? selection = await showOnsetTimePickerSheet(
+        context: context,
+        initialTime: state.draft.onsetAt ?? DateTime.now(),
+        initialStatus: state.draft.onsetTimeStatus,
+        sheetKey: const Key('onsetTimeSheet'),
+        confirmButtonKey: const Key('confirmOnsetAtButton'),
+      );
+      if (selection == null) {
+        return false;
+      }
+      viewModel.setOnsetTimeSelection(selection.status, selection.occurredAt);
       return true;
     }
 
@@ -320,15 +331,6 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
       Key confirmButtonKey,
     )
     config = switch (state.step) {
-      0 => (
-        '증상 발생 시각을 선택해주세요',
-        state.draft.onsetTimeStatus == ClinicalTimeStatus.estimated
-            ? '구급대원이 추정한 증상 발생 시각을 입력합니다.'
-            : '확인된 증상 발생 시각을 입력합니다.',
-        state.draft.onsetAt ?? DateTime.now(),
-        const Key('onsetTimeSheet'),
-        const Key('confirmOnsetAtButton'),
-      ),
       1 => (
         '분류·관찰 시각을 선택해주세요',
         'Pre-KTAS 분류와 AVPU를 관찰한 시각을 입력합니다.',
@@ -364,9 +366,6 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
       return false;
     }
     switch (state.step) {
-      case 0:
-        viewModel.setOnsetAt(selected);
-        break;
       case 1:
         viewModel.setAssessmentTime(selected);
         break;

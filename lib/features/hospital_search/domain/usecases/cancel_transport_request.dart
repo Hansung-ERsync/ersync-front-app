@@ -6,7 +6,7 @@ class CancelTransportRequest {
 
   final HospitalSearchRepository _repository;
 
-  Future<void> call(String requestId, TransportCancellationReason reason) {
-    return _repository.cancelRequest(requestId, reason);
+  Future<void> call(String requestId, TransportCancellation cancellation) {
+    return _repository.cancelRequest(requestId, cancellation);
   }
 }

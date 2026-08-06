@@ -1,15 +1,23 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/app_exception.dart';
+import '../../../../core/idempotency/idempotency_providers.dart';
+import '../../../../core/location/location_providers.dart';
+import '../../../../core/network/api_providers.dart';
 import '../../../auth/data/datasources/mock_auth_data_source.dart';
 import '../../../auth/domain/entities/auth_user.dart';
 import '../../../auth/presentation/providers/auth_view_model.dart';
 import '../../data/datasources/mock_patient_assessment_data_source.dart';
 import '../../data/repositories/mock_patient_assessment_repository.dart';
+import '../../data/repositories/api_patient_assessment_repository.dart';
+import '../../data/storage/patient_assessment_draft_store.dart';
 import '../../domain/entities/assessment_enums.dart';
 import '../../domain/entities/patient_assessment_draft.dart';
 import '../../domain/entities/transfer_request_receipt.dart';
 import '../../domain/repositories/patient_assessment_repository.dart';
+import '../../domain/usecases/clear_patient_assessment_draft.dart';
 import '../../domain/usecases/load_patient_assessment_draft.dart';
 import '../../domain/usecases/save_patient_assessment_draft.dart';
 import '../../domain/usecases/submit_transfer_request.dart';
@@ -34,6 +42,25 @@ patientAssessmentRepositoryProvider = Provider<PatientAssessmentRepository>(
   ),
 );
 
+final Provider<PatientAssessmentRepository>
+apiPatientAssessmentRepositoryProvider = Provider<PatientAssessmentRepository>((
+  Ref ref,
+) {
+  final AuthUser? user = ref.watch(
+    authViewModelProvider.select((AuthState state) => state.user),
+  );
+  return ApiPatientAssessmentRepository(
+    ref.watch(dioProvider),
+    callbackContact:
+        user?.callbackContact ?? MockAuthDataSource.mockCallbackContact,
+    locationService: ref.watch(deviceLocationServiceProvider),
+    draftStore: SecurePatientAssessmentDraftStore(
+      accountId: user?.accountId ?? 'signed-out',
+    ),
+    idempotencyKeyGenerator: ref.watch(idempotencyKeyGeneratorProvider),
+  );
+});
+
 final Provider<LoadPatientAssessmentDraft> loadPatientAssessmentDraftProvider =
     Provider<LoadPatientAssessmentDraft>(
       (Ref ref) => LoadPatientAssessmentDraft(
@@ -47,6 +74,13 @@ final Provider<SavePatientAssessmentDraft> savePatientAssessmentDraftProvider =
         ref.watch(patientAssessmentRepositoryProvider),
       ),
     );
+
+final Provider<ClearPatientAssessmentDraft>
+clearPatientAssessmentDraftProvider = Provider<ClearPatientAssessmentDraft>(
+  (Ref ref) => ClearPatientAssessmentDraft(
+    ref.watch(patientAssessmentRepositoryProvider),
+  ),
+);
 
 final Provider<SubmitTransferRequest> submitTransferRequestProvider =
     Provider<SubmitTransferRequest>(
@@ -66,8 +100,11 @@ patientAssessmentViewModelProvider =
 
 class PatientAssessmentViewModel
     extends AsyncNotifier<PatientAssessmentViewState> {
+  Timer? _draftSaveTimer;
+
   @override
   Future<PatientAssessmentViewState> build() async {
+    ref.onDispose(() => _draftSaveTimer?.cancel());
     final PatientAssessmentDraft draft = await ref
         .watch(loadPatientAssessmentDraftProvider)
         .call();
@@ -97,11 +134,20 @@ class PatientAssessmentViewModel
     _updateDraft(
       (PatientAssessmentDraft draft) => draft.copyWith(
         occurrenceType: value,
+        occurrenceDetail: value == OccurrenceType.other
+            ? draft.occurrenceDetail
+            : '',
         mechanism: value == OccurrenceType.nonDisease ? draft.mechanism : null,
         injurySites: value == OccurrenceType.nonDisease
             ? draft.injurySites
             : const <InjurySite>{},
       ),
+    );
+  }
+
+  void setOccurrenceDetail(String value) {
+    _updateDraft(
+      (PatientAssessmentDraft draft) => draft.copyWith(occurrenceDetail: value),
     );
   }
 
@@ -144,6 +190,15 @@ class PatientAssessmentViewModel
     );
   }
 
+  void setOnsetTimeSelection(ClinicalTimeStatus status, DateTime? occurredAt) {
+    _updateDraft(
+      (PatientAssessmentDraft draft) => draft.copyWith(
+        onsetTimeStatus: status,
+        onsetAt: status == ClinicalTimeStatus.unknown ? null : occurredAt,
+      ),
+    );
+  }
+
   void setPrimarySymptom(PatientSymptom value) {
     _updateDraft((PatientAssessmentDraft draft) {
       final Set<PatientSymptom> secondary = Set<PatientSymptom>.of(
@@ -151,9 +206,19 @@ class PatientAssessmentViewModel
       )..remove(value);
       return draft.copyWith(
         primarySymptom: value,
+        primarySymptomDetail: value == PatientSymptom.other
+            ? draft.primarySymptomDetail
+            : '',
         secondarySymptoms: secondary,
       );
     });
+  }
+
+  void setPrimarySymptomDetail(String value) {
+    _updateDraft(
+      (PatientAssessmentDraft draft) =>
+          draft.copyWith(primarySymptomDetail: value),
+    );
   }
 
   void toggleSecondarySymptom(PatientSymptom value) {
@@ -218,14 +283,28 @@ class PatientAssessmentViewModel
         unassessableReason: value == AvpuLevel.unassessable
             ? draft.unassessableReason
             : null,
+        unassessableDetail: value == AvpuLevel.unassessable
+            ? draft.unassessableDetail
+            : '',
       ),
     );
   }
 
   void setUnassessableReason(UnassessableReason value) {
     _updateDraft(
+      (PatientAssessmentDraft draft) => draft.copyWith(
+        unassessableReason: value,
+        unassessableDetail: value == UnassessableReason.other
+            ? draft.unassessableDetail
+            : '',
+      ),
+    );
+  }
+
+  void setUnassessableDetail(String value) {
+    _updateDraft(
       (PatientAssessmentDraft draft) =>
-          draft.copyWith(unassessableReason: value),
+          draft.copyWith(unassessableDetail: value),
     );
   }
 
@@ -313,15 +392,39 @@ class PatientAssessmentViewModel
       if (value == TreatmentType.none) {
         return draft.copyWith(
           treatments: const <TreatmentType>{TreatmentType.none},
+          treatmentEntries: const <TreatmentType, TreatmentEntryDraft>{},
         );
       }
 
       final Set<TreatmentType> updated = Set<TreatmentType>.of(draft.treatments)
         ..remove(TreatmentType.none);
+      final Map<TreatmentType, TreatmentEntryDraft> entries =
+          Map<TreatmentType, TreatmentEntryDraft>.of(draft.treatmentEntries);
       if (!updated.add(value)) {
         updated.remove(value);
+        entries.remove(value);
+      } else {
+        entries.putIfAbsent(value, TreatmentEntryDraft.new);
       }
-      return draft.copyWith(treatments: updated);
+      return draft.copyWith(treatments: updated, treatmentEntries: entries);
+    });
+  }
+
+  void setTreatmentAttemptResult(
+    TreatmentType type,
+    TreatmentAttemptResult value,
+  ) {
+    _updateTreatmentEntry(
+      type,
+      (TreatmentEntryDraft entry) => entry.copyWith(attemptResult: value),
+    );
+  }
+
+  void setTreatmentDetail(TreatmentType type, String key, String value) {
+    _updateTreatmentEntry(type, (TreatmentEntryDraft entry) {
+      final Map<String, String> details = Map<String, String>.of(entry.details);
+      details[key] = value;
+      return entry.copyWith(details: details);
     });
   }
 
@@ -447,9 +550,11 @@ class PatientAssessmentViewModel
 
     _setViewState(current.copyWith(isSubmitting: true, clearError: true));
     try {
+      _draftSaveTimer?.cancel();
       final TransferRequestReceipt receipt = await ref
           .read(submitTransferRequestProvider)
           .call(current.draft);
+      await ref.read(clearPatientAssessmentDraftProvider).call();
       _setViewState(
         current.copyWith(
           isSubmitting: false,
@@ -480,13 +585,28 @@ class PatientAssessmentViewModel
     });
   }
 
+  void _updateTreatmentEntry(
+    TreatmentType type,
+    TreatmentEntryDraft Function(TreatmentEntryDraft entry) update,
+  ) {
+    _updateDraft((PatientAssessmentDraft draft) {
+      final Map<TreatmentType, TreatmentEntryDraft> entries =
+          Map<TreatmentType, TreatmentEntryDraft>.of(draft.treatmentEntries);
+      entries[type] = update(entries[type] ?? const TreatmentEntryDraft());
+      return draft.copyWith(treatmentEntries: entries);
+    });
+  }
+
   void _updateDraft(
     PatientAssessmentDraft Function(PatientAssessmentDraft draft) update,
   ) {
     final PatientAssessmentViewState current = state.requireValue;
-    _setViewState(
-      current.copyWith(draft: update(current.draft), clearError: true),
-    );
+    final PatientAssessmentDraft updated = update(current.draft);
+    _setViewState(current.copyWith(draft: updated, clearError: true));
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(const Duration(milliseconds: 300), () {
+      unawaited(ref.read(savePatientAssessmentDraftProvider)(updated));
+    });
   }
 
   void clearValidationMessage() {
@@ -497,7 +617,7 @@ class PatientAssessmentViewModel
   }
 
   bool isStepValid(int step, PatientAssessmentDraft draft) {
-    return _validateStep(step, draft) == null;
+    return _validateStep(step, draft, requireOnsetTime: false) == null;
   }
 
   void _setViewState(PatientAssessmentViewState value) {
@@ -506,8 +626,9 @@ class PatientAssessmentViewModel
 
   _AssessmentValidationIssue? _validateStep(
     int step,
-    PatientAssessmentDraft draft,
-  ) {
+    PatientAssessmentDraft draft, {
+    bool requireOnsetTime = true,
+  }) {
     switch (step) {
       case 0:
         if (draft.ageStatus == null) {
@@ -534,6 +655,13 @@ class PatientAssessmentViewModel
             '발생 유형을 선택해주세요.',
           );
         }
+        if (draft.occurrenceType == OccurrenceType.other &&
+            draft.occurrenceDetail.trim().isEmpty) {
+          return const _AssessmentValidationIssue(
+            AssessmentValidationTarget.occurrenceType,
+            '발생 유형의 기타 상세를 입력해주세요.',
+          );
+        }
         if (draft.occurrenceType == OccurrenceType.nonDisease &&
             draft.mechanism == null) {
           return const _AssessmentValidationIssue(
@@ -548,13 +676,14 @@ class PatientAssessmentViewModel
             '비질병·외상 환자의 손상 부위를 선택해주세요.',
           );
         }
-        if (draft.onsetTimeStatus == null) {
+        if (requireOnsetTime && draft.onsetTimeStatus == null) {
           return const _AssessmentValidationIssue(
             AssessmentValidationTarget.onsetAt,
             '증상 발생 시각 구분을 선택해주세요.',
           );
         }
-        if (draft.onsetTimeStatus != ClinicalTimeStatus.unknown &&
+        if (requireOnsetTime &&
+            draft.onsetTimeStatus != ClinicalTimeStatus.unknown &&
             draft.onsetAt == null) {
           return const _AssessmentValidationIssue(
             AssessmentValidationTarget.onsetAt,
@@ -567,6 +696,13 @@ class PatientAssessmentViewModel
           return const _AssessmentValidationIssue(
             AssessmentValidationTarget.primarySymptom,
             '주증상을 선택해주세요.',
+          );
+        }
+        if (draft.primarySymptom == PatientSymptom.other &&
+            draft.primarySymptomDetail.trim().isEmpty) {
+          return const _AssessmentValidationIssue(
+            AssessmentValidationTarget.primarySymptom,
+            '주증상의 기타 상세를 입력해주세요.',
           );
         }
         if (draft.classificationStatus == null) {
@@ -608,6 +744,13 @@ class PatientAssessmentViewModel
           return const _AssessmentValidationIssue(
             AssessmentValidationTarget.unassessableReason,
             '의식 상태를 평가할 수 없는 사유를 선택해주세요.',
+          );
+        }
+        if (draft.unassessableReason == UnassessableReason.other &&
+            draft.unassessableDetail.trim().isEmpty) {
+          return const _AssessmentValidationIssue(
+            AssessmentValidationTarget.unassessableReason,
+            '의식 평가 불가의 기타 상세를 입력해주세요.',
           );
         }
         return null;
@@ -665,6 +808,24 @@ class PatientAssessmentViewModel
             '처치 없음은 다른 처치와 함께 선택할 수 없습니다.',
           );
         }
+        for (final TreatmentType type in draft.treatments.where(
+          (TreatmentType value) => value != TreatmentType.none,
+        )) {
+          final TreatmentEntryDraft? entry = draft.treatmentEntries[type];
+          if (entry?.attemptResult == null) {
+            return _AssessmentValidationIssue(
+              AssessmentValidationTarget.treatments,
+              '${type.label}의 처치 결과를 선택해주세요.',
+            );
+          }
+          final String? missingField = _missingTreatmentField(type, entry!);
+          if (missingField != null) {
+            return _AssessmentValidationIssue(
+              AssessmentValidationTarget.treatments,
+              '${type.label}의 $missingField 항목을 입력해주세요.',
+            );
+          }
+        }
         if ((draft.leftPupil == null) != (draft.rightPupil == null)) {
           return const _AssessmentValidationIssue(
             AssessmentValidationTarget.pupils,
@@ -693,6 +854,60 @@ class PatientAssessmentViewModel
       VitalType.temperature => 37.0,
       VitalType.oxygenSaturation => 98.0,
     };
+  }
+
+  String? _missingTreatmentField(
+    TreatmentType type,
+    TreatmentEntryDraft entry,
+  ) {
+    final List<MapEntry<String, String>> required = switch (type) {
+      TreatmentType.oxygen => const <MapEntry<String, String>>[
+        MapEntry<String, String>('method', '투여 방법'),
+        MapEntry<String, String>('flowRateLpm', '유량(L/min)'),
+      ],
+      TreatmentType.airway => const <MapEntry<String, String>>[
+        MapEntry<String, String>('device', '기도 확보 기구'),
+      ],
+      TreatmentType.cpr => const <MapEntry<String, String>>[
+        MapEntry<String, String>('currentStatus', '현재 상태'),
+      ],
+      TreatmentType.defibrillationAed => const <MapEntry<String, String>>[
+        MapEntry<String, String>('shockCount', '충격 횟수'),
+      ],
+      TreatmentType.ivFluid => const <MapEntry<String, String>>[
+        MapEntry<String, String>('fluidName', '수액명'),
+        MapEntry<String, String>('amountMl', '투여량(mL)'),
+      ],
+      TreatmentType.medication => const <MapEntry<String, String>>[
+        MapEntry<String, String>('medicationName', '약물명'),
+        MapEntry<String, String>('dose', '용량'),
+        MapEntry<String, String>('route', '투여 경로'),
+      ],
+      TreatmentType.bleedingWound ||
+      TreatmentType.immobilization => const <MapEntry<String, String>>[
+        MapEntry<String, String>('method', '처치 방법'),
+        MapEntry<String, String>('site', '처치 부위'),
+      ],
+      TreatmentType.ecg => const <MapEntry<String, String>>[
+        MapEntry<String, String>('leadType', '리드 종류'),
+      ],
+      TreatmentType.warmingCooling => const <MapEntry<String, String>>[
+        MapEntry<String, String>('method', '처치 방법'),
+      ],
+      TreatmentType.delivery => const <MapEntry<String, String>>[
+        MapEntry<String, String>('currentStatus', '현재 상태'),
+      ],
+      TreatmentType.other => const <MapEntry<String, String>>[
+        MapEntry<String, String>('detail', '상세 내용'),
+      ],
+      TreatmentType.none => const <MapEntry<String, String>>[],
+    };
+    for (final MapEntry<String, String> field in required) {
+      if ((entry.details[field.key] ?? '').trim().isEmpty) {
+        return field.value;
+      }
+    }
+    return null;
   }
 
   double _normalizeVitalValue(VitalType type, double value) {

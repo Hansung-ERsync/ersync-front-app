@@ -4,13 +4,19 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../patient_assessment/domain/entities/assessment_enums.dart';
 import '../../../patient_assessment/presentation/widgets/assessment_section.dart';
 import '../../../patient_assessment/presentation/widgets/clinical_time_editor.dart';
 import '../../../patient_assessment/presentation/widgets/numeric_stepper_field.dart';
+import '../../../patient_assessment/presentation/providers/patient_assessment_view_model.dart';
 import '../../domain/entities/in_transit_vital_update.dart';
 import '../../domain/entities/patient_transport_summary.dart';
 import '../../domain/entities/transport_session.dart';
 import '../providers/transport_view_model.dart';
+import '../../../hospital_search/presentation/widgets/transport_cancellation_sheet.dart';
+import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
+import '../../domain/entities/in_transit_clinical_updates.dart';
+import '../widgets/in_transit_clinical_update_sheets.dart';
 
 class TransportInProgressPage extends ConsumerStatefulWidget {
   const TransportInProgressPage({super.key, required this.session});
@@ -23,20 +29,32 @@ class TransportInProgressPage extends ConsumerStatefulWidget {
 }
 
 class _TransportInProgressPageState
-    extends ConsumerState<TransportInProgressPage> {
+    extends ConsumerState<TransportInProgressPage>
+    with WidgetsBindingObserver {
   late final TransportViewModel _viewModel;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _viewModel = ref.read(transportViewModelProvider.notifier);
     Future<void>.microtask(() => _viewModel.start(widget.session));
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _viewModel.stop();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    if (lifecycleState == AppLifecycleState.resumed) {
+      _viewModel.resumeLocationUpdates();
+    } else {
+      _viewModel.pauseLocationUpdates();
+    }
   }
 
   @override
@@ -68,8 +86,17 @@ class _TransportInProgressPageState
                     _PatientSummaryCard(summary: summary),
                     const SizedBox(height: 18),
                     _ClinicalUpdateCard(
-                      isSaving: state.isSavingVitals,
+                      isSavingVitals: state.isSavingVitals,
+                      isSavingConsciousness: state.isSavingConsciousness,
+                      isSavingPreKtas: state.isSavingPreKtas,
+                      isSavingTreatment: state.isSavingTreatment,
+                      latestTreatmentLabel: state.latestTreatmentLabel,
+                      latestTreatmentAt: state.latestTreatmentAt,
                       onAddVitals: () => _addVitalUpdate(summary),
+                      onAddConsciousness: () =>
+                          _addConsciousnessUpdate(summary),
+                      onAddPreKtas: () => _addPreKtasUpdate(summary),
+                      onAddTreatment: _addTreatmentUpdate,
                     ),
                     if (state.errorMessage != null) ...<Widget>[
                       const SizedBox(height: 12),
@@ -81,12 +108,46 @@ class _TransportInProgressPageState
                         ),
                       ),
                     ],
+                    if (state.locationErrorMessage != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      Container(
+                        key: const Key('locationUpdateWarning'),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.checkingBackground,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            const Icon(
+                              Icons.location_off_outlined,
+                              color: AppColors.statusChecking,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                state.locationErrorMessage!,
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               _HandoffBottomAction(
+                isHandoffPending: widget.session.isHandoffPending,
                 isSubmitting: state.isRequestingHandoff,
+                isCancelling: state.isCancelling,
+                isClinicalUpdateSaving: state.isSavingClinicalUpdate,
                 onPressed: _requestHandoff,
+                onCancel: _cancelTransport,
               ),
             ],
           ),
@@ -158,6 +219,115 @@ class _TransportInProgressPageState
     }
   }
 
+  Future<void> _addConsciousnessUpdate(PatientTransportSummary summary) async {
+    final InTransitConsciousnessSelection? selection =
+        await showInTransitConsciousnessSheet(
+          context: context,
+          summary: summary,
+        );
+    if (selection == null || !mounted) {
+      return;
+    }
+    final DateTime? observedAt = await showClinicalTimePickerSheet(
+      context: context,
+      title: '의식 관찰 시간을 선택해주세요',
+      description: '이송 중 새로 관찰한 시각으로 기록합니다.',
+      initialTime: DateTime.now(),
+      sheetKey: const Key('inTransitConsciousnessTimeSheet'),
+      confirmButtonKey: const Key('confirmInTransitConsciousnessTimeButton'),
+    );
+    if (observedAt == null || !mounted) {
+      return;
+    }
+    final bool saved = await _viewModel.addConsciousnessUpdate(
+      InTransitConsciousnessUpdate(
+        avpu: selection.avpu,
+        unassessableReason: selection.unassessableReason,
+        unassessableDetail: selection.unassessableDetail,
+        observedAt: observedAt,
+        enteredAt: DateTime.now(),
+      ),
+    );
+    if (saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('의식 상태를 기록했습니다. 이전 평가는 유지됩니다.')),
+      );
+    }
+  }
+
+  Future<void> _addPreKtasUpdate(PatientTransportSummary summary) async {
+    final InTransitPreKtasSelection? selection =
+        await showInTransitPreKtasSheet(context: context, summary: summary);
+    if (selection == null || !mounted) {
+      return;
+    }
+    final DateTime? assessedAt;
+    if (selection.classificationStatus == ClassificationStatus.completed) {
+      assessedAt = await showClinicalTimePickerSheet(
+        context: context,
+        title: 'Pre-KTAS 평가 시간을 선택해주세요',
+        description: '새 중증도 분류를 평가한 시각으로 기록합니다.',
+        initialTime: DateTime.now(),
+        sheetKey: const Key('inTransitPreKtasTimeSheet'),
+        confirmButtonKey: const Key('confirmInTransitPreKtasTimeButton'),
+      );
+      if (assessedAt == null || !mounted) {
+        return;
+      }
+    } else {
+      assessedAt = null;
+    }
+    final bool saved = await _viewModel.addPreKtasUpdate(
+      InTransitPreKtasUpdate(
+        classificationStatus: selection.classificationStatus,
+        level: selection.level,
+        exceptionReason: selection.exceptionReason,
+        exceptionDetail: selection.exceptionDetail,
+        assessedAt: assessedAt,
+        standardVersion: summary.preKtasStandardVersion,
+        enteredAt: DateTime.now(),
+      ),
+    );
+    if (saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pre-KTAS를 기록했습니다. 이전 평가는 유지됩니다.')),
+      );
+    }
+  }
+
+  Future<void> _addTreatmentUpdate() async {
+    final InTransitTreatmentSelection? selection =
+        await showInTransitTreatmentSheet(context: context);
+    if (selection == null || !mounted) {
+      return;
+    }
+    final DateTime? performedAt = await showClinicalTimePickerSheet(
+      context: context,
+      title: '처치 시간을 선택해주세요',
+      description: '처치를 시행하거나 시도한 시각으로 기록합니다.',
+      initialTime: DateTime.now(),
+      sheetKey: const Key('inTransitTreatmentTimeSheet'),
+      confirmButtonKey: const Key('confirmInTransitTreatmentTimeButton'),
+    );
+    if (performedAt == null || !mounted) {
+      return;
+    }
+    final bool saved = await _viewModel.addTreatmentUpdate(
+      InTransitTreatmentUpdate(
+        type: selection.type,
+        attemptResult: selection.attemptResult,
+        details: selection.details,
+        performedAt: performedAt,
+        enteredAt: DateTime.now(),
+      ),
+    );
+    if (saved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('처치 기록을 추가했습니다. 이전 기록은 유지됩니다.')),
+      );
+    }
+  }
+
   Future<void> _requestHandoff() async {
     final bool confirmed =
         await showDialog<bool>(
@@ -182,6 +352,30 @@ class _TransportInProgressPageState
     );
   }
 
+  Future<void> _cancelTransport() async {
+    final TransportCancellation? cancellation =
+        await showTransportCancellationSheet(context);
+    if (cancellation == null || !mounted) {
+      return;
+    }
+    final bool cancelled = await _viewModel.cancel(cancellation);
+    if (!mounted) {
+      return;
+    }
+    if (cancelled) {
+      await ref.read(clearPatientAssessmentDraftProvider).call();
+      ref.invalidate(patientAssessmentViewModelProvider);
+      if (!mounted) {
+        return;
+      }
+      context.goNamed('home');
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('이송을 취소하지 못했습니다. 다시 시도해주세요.')));
+  }
+
   String _formatElapsed(int elapsedSeconds) {
     final int minutes = elapsedSeconds ~/ 60;
     final int seconds = elapsedSeconds % 60;
@@ -193,11 +387,19 @@ class _TransportInProgressPageState
 class _HandoffBottomAction extends StatelessWidget {
   const _HandoffBottomAction({
     required this.isSubmitting,
+    required this.isHandoffPending,
+    required this.isCancelling,
+    required this.isClinicalUpdateSaving,
     required this.onPressed,
+    required this.onCancel,
   });
 
   final bool isSubmitting;
+  final bool isHandoffPending;
+  final bool isCancelling;
+  final bool isClinicalUpdateSaving;
   final VoidCallback onPressed;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -209,25 +411,75 @@ class _HandoffBottomAction extends StatelessWidget {
         color: AppColors.surface,
         border: Border(top: BorderSide(color: AppColors.border)),
       ),
-      child: SizedBox(
-        height: 56,
-        child: FilledButton(
-          key: const Key('requestHandoffButton'),
-          onPressed: isSubmitting ? null : onPressed,
-          child: isSubmitting
-              ? const SizedBox.square(
-                  dimension: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    color: AppColors.textOnDark,
-                  ),
-                )
-              : const Text(
-                  '인계 요청',
+      child: isHandoffPending
+          ? const SizedBox(
+              height: 56,
+              child: FilledButton(
+                key: Key('handoffPendingButton'),
+                onPressed: null,
+                child: Text(
+                  '병원 인계 확인 대기 중',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
-        ),
-      ),
+              ),
+            )
+          : Row(
+              children: <Widget>[
+                Expanded(
+                  child: SizedBox(
+                    height: 56,
+                    child: OutlinedButton(
+                      key: const Key('cancelInTransitButton'),
+                      onPressed:
+                          isSubmitting || isCancelling || isClinicalUpdateSaving
+                          ? null
+                          : onCancel,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.statusNegative,
+                        side: const BorderSide(color: AppColors.negativeBorder),
+                      ),
+                      child: isCancelling
+                          ? const SizedBox.square(
+                              dimension: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                              ),
+                            )
+                          : const Text(
+                              '이송 취소',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: 56,
+                    child: FilledButton(
+                      key: const Key('requestHandoffButton'),
+                      onPressed:
+                          isSubmitting || isCancelling || isClinicalUpdateSaving
+                          ? null
+                          : onPressed,
+                      child: isSubmitting
+                          ? const SizedBox.square(
+                              dimension: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: AppColors.textOnDark,
+                              ),
+                            )
+                          : const Text(
+                              '인계 요청',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -658,12 +910,34 @@ class _SummaryValue extends StatelessWidget {
 
 class _ClinicalUpdateCard extends StatelessWidget {
   const _ClinicalUpdateCard({
-    required this.isSaving,
+    required this.isSavingVitals,
+    required this.isSavingConsciousness,
+    required this.isSavingPreKtas,
+    required this.isSavingTreatment,
+    required this.latestTreatmentLabel,
+    required this.latestTreatmentAt,
     required this.onAddVitals,
+    required this.onAddConsciousness,
+    required this.onAddPreKtas,
+    required this.onAddTreatment,
   });
 
-  final bool isSaving;
+  final bool isSavingVitals;
+  final bool isSavingConsciousness;
+  final bool isSavingPreKtas;
+  final bool isSavingTreatment;
+  final String? latestTreatmentLabel;
+  final DateTime? latestTreatmentAt;
   final VoidCallback onAddVitals;
+  final VoidCallback onAddConsciousness;
+  final VoidCallback onAddPreKtas;
+  final VoidCallback onAddTreatment;
+
+  bool get _isSavingAny =>
+      isSavingVitals ||
+      isSavingConsciousness ||
+      isSavingPreKtas ||
+      isSavingTreatment;
 
   @override
   Widget build(BuildContext context) {
@@ -683,21 +957,137 @@ class _ClinicalUpdateCard extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           const Text(
-            '최신 상태를 수정해도 기존 측정 기록은 시간순으로 유지됩니다.',
+            '새 상태를 기록하면 요약에는 최신 값이 표시되고, 이전 기록은 시간순으로 유지됩니다.',
             style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              key: const Key('addInTransitVitalsButton'),
-              onPressed: isSaving ? null : onAddVitals,
-              icon: const Icon(Icons.monitor_heart_outlined),
-              label: const Text('활력징후 수정'),
-            ),
+          _ClinicalUpdateButton(
+            buttonKey: const Key('addInTransitVitalsButton'),
+            label: '활력징후 수정',
+            icon: Icons.monitor_heart_outlined,
+            primary: true,
+            isSaving: isSavingVitals,
+            isDisabled: _isSavingAny,
+            onPressed: onAddVitals,
           ),
+          const SizedBox(height: 9),
+          _ClinicalUpdateButton(
+            buttonKey: const Key('addInTransitConsciousnessButton'),
+            label: '의식 상태 수정',
+            icon: Icons.visibility_outlined,
+            isSaving: isSavingConsciousness,
+            isDisabled: _isSavingAny,
+            onPressed: onAddConsciousness,
+          ),
+          const SizedBox(height: 9),
+          _ClinicalUpdateButton(
+            buttonKey: const Key('addInTransitPreKtasButton'),
+            label: 'Pre-KTAS 수정',
+            icon: Icons.assignment_outlined,
+            isSaving: isSavingPreKtas,
+            isDisabled: _isSavingAny,
+            onPressed: onAddPreKtas,
+          ),
+          const SizedBox(height: 9),
+          _ClinicalUpdateButton(
+            buttonKey: const Key('addInTransitTreatmentButton'),
+            label: '처치 기록 추가',
+            icon: Icons.medical_services_outlined,
+            isSaving: isSavingTreatment,
+            isDisabled: _isSavingAny,
+            onPressed: onAddTreatment,
+          ),
+          if (latestTreatmentLabel != null) ...<Widget>[
+            const SizedBox(height: 14),
+            Container(
+              key: const Key('latestInTransitTreatment'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: <Widget>[
+                  const Icon(
+                    Icons.history_rounded,
+                    size: 18,
+                    color: AppColors.textTertiary,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      '최근 처치  $latestTreatmentLabel',
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (latestTreatmentAt != null)
+                    Text(
+                      formatClinicalTime(latestTreatmentAt!),
+                      style: const TextStyle(
+                        color: AppColors.textTertiary,
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _ClinicalUpdateButton extends StatelessWidget {
+  const _ClinicalUpdateButton({
+    required this.buttonKey,
+    required this.label,
+    required this.icon,
+    required this.isSaving,
+    required this.isDisabled,
+    required this.onPressed,
+    this.primary = false,
+  });
+
+  final Key buttonKey;
+  final String label;
+  final IconData icon;
+  final bool isSaving;
+  final bool isDisabled;
+  final VoidCallback onPressed;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget iconWidget = isSaving
+        ? const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : Icon(icon);
+    final VoidCallback? callback = isDisabled ? null : onPressed;
+
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: primary
+          ? FilledButton.icon(
+              key: buttonKey,
+              onPressed: callback,
+              icon: iconWidget,
+              label: Text(isSaving ? '저장 중...' : label),
+            )
+          : OutlinedButton.icon(
+              key: buttonKey,
+              onPressed: callback,
+              icon: iconWidget,
+              label: Text(isSaving ? '저장 중...' : label),
+            ),
     );
   }
 }
