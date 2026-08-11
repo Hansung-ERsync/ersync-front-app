@@ -55,6 +55,12 @@ class ApiTransportRepository implements TransportRepository {
       final String status = _string(active, 'status');
       final DateTime createdAt = _date(active, 'createdAt');
 
+      // 인계 요청을 보낸 건은 메인의 최근 이송에서 확인한다. 자동 복구로
+      // 이송 화면에 다시 진입시키면 새 환자 등록이 막힌다.
+      if (status == 'HANDOFF_REQUESTED') {
+        return null;
+      }
+
       final Response<Object?> detailResponse = await _dio.get<Object?>(
         '/api/v1/transport-requests/$requestId',
         options: _options(),
@@ -85,7 +91,7 @@ class ApiTransportRepository implements TransportRepository {
         );
       }
 
-      if (status == 'EN_ROUTE' || status == 'HANDOFF_REQUESTED') {
+      if (status == 'EN_ROUTE') {
         final AcceptedHospital? destination = _currentDestination(search);
         if (destination == null) {
           throw const AppException(
@@ -406,15 +412,14 @@ class ApiTransportRepository implements TransportRepository {
           offer['currentDestination'] != true) {
         continue;
       }
-      final int distanceMeters =
+      final int? distanceMeters =
           _int(offer['routeDistanceMeters']) ??
-          _int(offer['straightLineDistanceMeters']) ??
-          0;
+          _int(offer['straightLineDistanceMeters']);
       final int? etaSeconds = _int(offer['etaSeconds']);
       return AcceptedHospital(
         offerId: offerId,
         name: _string(offer, 'hospitalName'),
-        address: '주소 정보 없음',
+        address: _hospitalAddress(offer),
         emergencyRoomPhone: offer['hospitalContact'] as String? ?? '연락처 정보 없음',
         distanceMeters: distanceMeters,
         etaMinutes: etaSeconds == null ? null : (etaSeconds / 60).ceil(),
@@ -520,6 +525,14 @@ class ApiTransportRepository implements TransportRepository {
       return value;
     }
     throw const AppException('서버 응답을 처리할 수 없습니다.', code: 'INVALID_RESPONSE');
+  }
+
+  String _hospitalAddress(Map<String, Object?> offer) {
+    final Object? value = offer['hospitalAddress'];
+    if (value is String && value.trim().isNotEmpty) {
+      return value.trim();
+    }
+    return '주소 정보 동기화 중';
   }
 
   int? _int(Object? value) => value is num ? value.toInt() : null;

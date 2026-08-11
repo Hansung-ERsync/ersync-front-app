@@ -215,6 +215,33 @@ void main() {
     });
   });
 
+  test('인계 확인 대기 중인 이송은 메인에서 자동으로 다시 열지 않는다', () async {
+    final List<RequestOptions> captured = <RequestOptions>[];
+    final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
+      ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
+        captured.add(request);
+        return _jsonResponse(<String, Object?>{
+          'items': <Object?>[
+            <String, Object?>{
+              'transportRequestId': 'REQUEST-HANDOFF-PENDING',
+              'status': 'HANDOFF_REQUESTED',
+              'hospitalName': '서울시청 테스트병원',
+              'createdAt': '2026-08-06T06:00:00Z',
+              'statusUpdatedAt': '2026-08-06T06:10:00Z',
+            },
+          ],
+        });
+      });
+
+    final ActiveTransportRecovery? recovery = await ApiTransportRepository(
+      dio,
+    ).recoverActiveTransport();
+
+    expect(recovery, isNull);
+    expect(captured, hasLength(1));
+    expect(captured.single.uri.path, '/api/v1/transport-requests');
+  });
+
   test('ACTIVE 목록과 상세·병원 검색으로 이동 중 화면을 복구한다', () async {
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
@@ -291,6 +318,7 @@ void main() {
               <String, Object?>{
                 'offerId': 'OFFER-1',
                 'hospitalName': '한양대학교병원',
+                'hospitalAddress': '서울특별시 성동구 왕십리로 222-1',
                 'hospitalContact': '02-2290-8119',
                 'currentDestination': true,
                 'routeDistanceMeters': 8400,
@@ -310,6 +338,10 @@ void main() {
     expect(recovery?.transportSession?.requestId, 'REQUEST-ACTIVE');
     expect(recovery?.transportSession?.requestStatus, 'EN_ROUTE');
     expect(recovery?.transportSession?.destination.name, '한양대학교병원');
+    expect(
+      recovery?.transportSession?.destination.address,
+      '서울특별시 성동구 왕십리로 222-1',
+    );
     expect(recovery?.transportSession?.patientSummary.ageLabel, '45세 추정');
     expect(
       recovery?.transportSession?.patientSummary.bloodPressureDisplay,

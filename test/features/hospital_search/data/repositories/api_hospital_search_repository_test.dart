@@ -95,6 +95,60 @@ void main() {
     expect(progress.elapsedSeconds, 5 * 60);
   });
 
+  test('병원 수락 후 목적지 선택 전까지 경과 시간을 계속 실행한다', () async {
+    final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
+      ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
+        return _jsonResponse(<String, Object?>{
+          'transportRequestId': 'REQUEST-ACCEPTED',
+          'status': 'ACCEPTED_AVAILABLE',
+          'currentDestinationOfferId': null,
+          'currentAttempt': <String, Object?>{
+            'dispatchAttemptId': 'ATTEMPT-ACCEPTED',
+            'number': 1,
+            'status': 'ACCEPTED_AVAILABLE',
+            'currentRadiusKm': 100,
+            'candidateShortage': false,
+            'nextExpansionAt': null,
+            'startedAt': '2026-08-05T06:00:00Z',
+            'endedAt': null,
+          },
+          'exhaustionReason': null,
+          'offers': <Object?>[
+            <String, Object?>{
+              'offerId': 'OFFER-ACCEPTED',
+              'status': 'ACCEPTED',
+              'hospitalName': '서울시청 테스트병원',
+              'hospitalAddress': '서울특별시 중구 세종대로 110',
+              'hospitalContact': '02-1234-5678',
+              'straightLineDistanceMeters': 0,
+              'routeDistanceMeters': null,
+              'etaSeconds': null,
+              'respondedAt': '2026-08-05T06:00:19Z',
+            },
+          ],
+          'serverNow': '2026-08-05T06:05:00Z',
+        });
+      });
+
+    final progress = await ApiHospitalSearchRepository(dio).getProgress(
+      HospitalSearchSession(
+        requestId: 'REQUEST-ACCEPTED',
+        startedAt: DateTime.utc(2026, 8, 5, 6),
+        initialRadiusKm: 10,
+        radiusStepKm: 10,
+        expansionIntervalSeconds: 60,
+        maximumRadiusKm: 100,
+      ),
+    );
+
+    expect(progress.requestStatus, 'ACCEPTED_AVAILABLE');
+    expect(progress.isElapsedRunning, isTrue);
+    expect(progress.elapsedSeconds, 5 * 60);
+    expect(progress.acceptedHospitals.single.address, '서울특별시 중구 세종대로 110');
+    expect(progress.acceptedHospitals.single.distanceLabel, '100m 미만');
+    expect(progress.acceptedHospitals.single.etaLabel, isNull);
+  });
+
   test('목적지 변경 명령과 후보 소진 재검색마다 새 멱등성 키를 사용한다', () async {
     final List<RequestOptions> captured = <RequestOptions>[];
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))

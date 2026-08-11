@@ -341,7 +341,6 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
           child: Column(
             children: <Widget>[
               _AcceptedStatusBar(
-                radiusKm: progress.currentRadiusKm,
                 elapsedLabel: _formatElapsed(progress.elapsedSeconds),
               ),
               Expanded(
@@ -643,12 +642,8 @@ class _RadarRing extends StatelessWidget {
 }
 
 class _AcceptedStatusBar extends StatelessWidget {
-  const _AcceptedStatusBar({
-    required this.radiusKm,
-    required this.elapsedLabel,
-  });
+  const _AcceptedStatusBar({required this.elapsedLabel});
 
-  final int radiusKm;
   final String elapsedLabel;
 
   @override
@@ -668,10 +663,7 @@ class _AcceptedStatusBar extends StatelessWidget {
             size: 20,
           ),
           const SizedBox(width: 7),
-          Text(
-            '${radiusKm}km 전송 범위',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
+          const Text('이송 요청 중', style: TextStyle(fontWeight: FontWeight.w800)),
           const Spacer(),
           const Icon(
             Icons.schedule_rounded,
@@ -774,10 +766,11 @@ class _AcceptedHospitalCard extends StatelessWidget {
                 icon: Icons.near_me_outlined,
                 label: hospital.distanceLabel,
               ),
-              _HospitalInfoChip(
-                icon: Icons.route_outlined,
-                label: hospital.etaLabel,
-              ),
+              if (hospital.etaLabel != null)
+                _HospitalInfoChip(
+                  icon: Icons.route_outlined,
+                  label: hospital.etaLabel!,
+                ),
               _HospitalInfoChip(
                 icon: Icons.check_circle_outline_rounded,
                 label: '수락 ${_formatAcceptedTime(hospital.acceptedAt)}',

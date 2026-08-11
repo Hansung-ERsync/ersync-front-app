@@ -70,10 +70,6 @@ class _TransportInProgressPageState
         body: SafeArea(
           child: Column(
             children: <Widget>[
-              _TransportStatusBar(
-                elapsedLabel: _formatElapsed(state.elapsedSeconds),
-                etaLabel: widget.session.destination.etaLabel,
-              ),
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
@@ -344,7 +340,14 @@ class _TransportInProgressPageState
       return;
     }
     if (requested) {
-      context.goNamed('home');
+      try {
+        await ref.read(clearPatientAssessmentDraftProvider).call();
+      } finally {
+        ref.invalidate(patientAssessmentViewModelProvider);
+        if (mounted) {
+          context.goNamed('home');
+        }
+      }
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -374,13 +377,6 @@ class _TransportInProgressPageState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('이송을 취소하지 못했습니다. 다시 시도해주세요.')));
-  }
-
-  String _formatElapsed(int elapsedSeconds) {
-    final int minutes = elapsedSeconds ~/ 60;
-    final int seconds = elapsedSeconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:'
-        '${seconds.toString().padLeft(2, '0')}';
   }
 }
 
@@ -558,41 +554,6 @@ class _HandoffRequestDialog extends StatelessWidget {
   }
 }
 
-class _TransportStatusBar extends StatelessWidget {
-  const _TransportStatusBar({
-    required this.elapsedLabel,
-    required this.etaLabel,
-  });
-
-  final String elapsedLabel;
-  final String etaLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        border: Border(bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        children: <Widget>[
-          const Text('이송 진행 중', style: TextStyle(fontWeight: FontWeight.w800)),
-          const Spacer(),
-          Text(
-            '$etaLabel · $elapsedLabel',
-            key: const Key('transportElapsedTime'),
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _DestinationHospitalCard extends StatelessWidget {
   const _DestinationHospitalCard({required this.session, required this.onCall});
 
@@ -640,11 +601,13 @@ class _DestinationHospitalCard extends StatelessWidget {
                 icon: Icons.near_me_outlined,
                 text: hospital.distanceLabel,
               ),
-              const SizedBox(width: 14),
-              _CompactInfo(
-                icon: Icons.schedule_outlined,
-                text: hospital.etaLabel,
-              ),
+              if (hospital.etaLabel != null) ...<Widget>[
+                const SizedBox(width: 14),
+                _CompactInfo(
+                  icon: Icons.schedule_outlined,
+                  text: hospital.etaLabel!,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 16),

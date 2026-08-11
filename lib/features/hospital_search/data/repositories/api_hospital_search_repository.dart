@@ -55,16 +55,15 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
           if (offer['status'] != 'ACCEPTED') {
             continue;
           }
-          final int distanceMeters =
+          final int? distanceMeters =
               _int(offer['routeDistanceMeters']) ??
-              _int(offer['straightLineDistanceMeters']) ??
-              0;
+              _int(offer['straightLineDistanceMeters']);
           final int? etaSeconds = _int(offer['etaSeconds']);
           accepted.add(
             AcceptedHospital(
               offerId: _requiredString(offer, 'offerId'),
               name: _requiredString(offer, 'hospitalName'),
-              address: '주소 정보 없음',
+              address: _hospitalAddress(offer),
               emergencyRoomPhone:
                   offer['hospitalContact'] as String? ?? '연락처 정보 없음',
               distanceMeters: distanceMeters,
@@ -80,7 +79,9 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
       return HospitalSearchProgress(
         requestId: _requiredString(body, 'transportRequestId'),
         requestStatus: requestStatus,
-        isElapsedRunning: requestStatus == 'SEARCHING',
+        isElapsedRunning:
+            requestStatus == 'SEARCHING' ||
+            requestStatus == 'ACCEPTED_AVAILABLE',
         expansionRemainingSeconds: requestStatus == 'SEARCHING'
             ? expansionRemainingSeconds
             : null,
@@ -170,6 +171,14 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
       return value;
     }
     throw const AppException('서버 응답을 처리할 수 없습니다.', code: 'INVALID_RESPONSE');
+  }
+
+  String _hospitalAddress(Map<String, Object?> offer) {
+    final Object? value = offer['hospitalAddress'];
+    if (value is String && value.trim().isNotEmpty) {
+      return value.trim();
+    }
+    return '주소 정보 동기화 중';
   }
 
   int? _int(Object? value) => value is num ? value.toInt() : null;

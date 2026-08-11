@@ -947,6 +947,38 @@ void main() {
     );
   });
 
+  testWidgets('이송 화면 상단 상태와 경과 시간을 표시하지 않는다', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData(useMaterial3: true),
+          home: TransportInProgressPage(
+            session: TransportSession(
+              requestId: 'REQ-NO-ETA',
+              requestStartedAt: DateTime.now(),
+              destination: AcceptedHospital(
+                offerId: 'OFFER-NO-ETA',
+                name: '서울시청 테스트병원',
+                address: '서울특별시 중구 세종대로 110',
+                emergencyRoomPhone: '02-1234-5678',
+                distanceMeters: 0,
+                etaMinutes: null,
+                acceptedAt: DateTime.now(),
+              ),
+              patientSummary: const PatientTransportSummary.empty(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('이송 진행 중'), findsNothing);
+    expect(find.text('ETA 계산 중'), findsNothing);
+    expect(find.byKey(const Key('transportElapsedTime')), findsNothing);
+    expect(find.text('100m 미만'), findsOneWidget);
+  });
+
   testWidgets('이송 중 기타 취소 사유는 200자 상세 입력을 요구한다', (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -1226,7 +1258,7 @@ void main() {
       ),
       findsNothing,
     );
-    expect(find.text('10km 전송 범위'), findsOneWidget);
+    expect(find.text('이송 요청 중'), findsOneWidget);
     expect(find.text('한양대학교병원'), findsOneWidget);
     expect(find.text('8.4km'), findsOneWidget);
     expect(find.text('예상 18분'), findsOneWidget);
@@ -1287,7 +1319,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
 
-    expect(find.text('이송 진행 중'), findsOneWidget);
+    expect(find.text('이송 진행 중'), findsNothing);
+    expect(find.byKey(const Key('transportElapsedTime')), findsNothing);
     expect(find.byIcon(Icons.local_shipping_outlined), findsNothing);
     expect(find.byKey(const Key('destinationHospitalCard')), findsOneWidget);
     expect(
@@ -1387,8 +1420,9 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('confirmHandoffRequestButton')));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 250));
-    await tester.pump(const Duration(milliseconds: 250));
+    for (int step = 0; step < 4; step += 1) {
+      await tester.pump(const Duration(milliseconds: 250));
+    }
 
     expect(find.text('새 환자 등록'), findsOneWidget);
     expect(find.text('인계 대기 중'), findsOneWidget);

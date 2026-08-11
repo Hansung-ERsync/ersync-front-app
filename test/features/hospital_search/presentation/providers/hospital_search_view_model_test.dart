@@ -111,6 +111,52 @@ void main() {
     expect(repository.getProgressCallCount, 1);
   });
 
+  test('병원 수락 후 목적지 선택 전에도 경과 타이머를 계속 증가시킨다', () async {
+    final _RecordingHospitalSearchRepository repository =
+        _RecordingHospitalSearchRepository(
+          nextProgress: const HospitalSearchProgress(
+            requestId: 'REQUEST-ACCEPTED',
+            currentRadiusKm: 100,
+            elapsedSeconds: 19,
+            requestStatus: 'ACCEPTED_AVAILABLE',
+            isElapsedRunning: true,
+          ),
+        );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        hospitalSearchRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final HospitalSearchViewModel viewModel = container.read(
+      hospitalSearchViewModelProvider.notifier,
+    );
+    viewModel.start(
+      HospitalSearchSession(
+        requestId: 'REQUEST-ACCEPTED',
+        startedAt: DateTime.now(),
+        initialRadiusKm: 10,
+        radiusStepKm: 10,
+        expansionIntervalSeconds: 60,
+        maximumRadiusKm: 100,
+      ),
+    );
+    await _waitForCalls(repository, 1);
+    expect(
+      container.read(hospitalSearchViewModelProvider).progress?.elapsedSeconds,
+      19,
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+
+    expect(
+      container.read(hospitalSearchViewModelProvider).progress?.elapsedSeconds,
+      greaterThanOrEqualTo(20),
+    );
+    viewModel.stop();
+  });
+
   test('같은 목적지 명령 재시도는 키를 유지하고 새 선택에는 새 키를 쓴다', () async {
     final _RecordingHospitalSearchRepository repository =
         _RecordingHospitalSearchRepository(failFirstDestination: true);

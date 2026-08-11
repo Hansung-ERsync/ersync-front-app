@@ -13,17 +13,24 @@ class AcceptedHospital {
   final String name;
   final String address;
   final String emergencyRoomPhone;
-  final int distanceMeters;
+  final int? distanceMeters;
   final int? etaMinutes;
   final DateTime acceptedAt;
 
   String get distanceLabel {
-    if (distanceMeters < 1000) {
-      return '${distanceMeters}m';
+    final int? meters = distanceMeters;
+    if (meters == null) {
+      return '거리 정보 없음';
     }
-    final double kilometers = distanceMeters / 1000;
+    if (meters < 100) {
+      return '100m 미만';
+    }
+    if (meters < 1000) {
+      return '${meters}m';
+    }
+    final double kilometers = meters / 1000;
     return '${kilometers.toStringAsFixed(kilometers >= 10 ? 0 : 1)}km';
   }
 
-  String get etaLabel => etaMinutes == null ? 'ETA 계산 중' : '예상 $etaMinutes분';
+  String? get etaLabel => etaMinutes == null ? null : '예상 $etaMinutes분';
 }
