@@ -18,6 +18,14 @@ class PatientTransportSummary {
     this.respiratoryRateStateLabel = '확인 불가',
     this.temperatureStateLabel = '확인 불가',
     this.oxygenSaturationStateLabel = '확인 불가',
+    this.glucoseMgDl,
+    this.leftPupilLabel,
+    this.rightPupilLabel,
+    this.medicalHistory,
+    this.allergies,
+    this.medications,
+    this.isolationConcern,
+    this.supplementalAssessedAt,
   });
 
   const PatientTransportSummary.empty()
@@ -38,7 +46,15 @@ class PatientTransportSummary {
       pulseStateLabel = '확인 불가',
       respiratoryRateStateLabel = '확인 불가',
       temperatureStateLabel = '확인 불가',
-      oxygenSaturationStateLabel = '확인 불가';
+      oxygenSaturationStateLabel = '확인 불가',
+      glucoseMgDl = null,
+      leftPupilLabel = null,
+      rightPupilLabel = null,
+      medicalHistory = null,
+      allergies = null,
+      medications = null,
+      isolationConcern = null,
+      supplementalAssessedAt = null;
 
   final String ageLabel;
   final String sexLabel;
@@ -58,6 +74,23 @@ class PatientTransportSummary {
   final String respiratoryRateStateLabel;
   final String temperatureStateLabel;
   final String oxygenSaturationStateLabel;
+  final int? glucoseMgDl;
+  final String? leftPupilLabel;
+  final String? rightPupilLabel;
+  final String? medicalHistory;
+  final String? allergies;
+  final String? medications;
+  final bool? isolationConcern;
+  final DateTime? supplementalAssessedAt;
+
+  bool get hasSupplementalAssessment =>
+      glucoseMgDl != null ||
+      leftPupilLabel != null ||
+      rightPupilLabel != null ||
+      medicalHistory != null ||
+      allergies != null ||
+      medications != null ||
+      isolationConcern != null;
 
   String get bloodPressureDisplay => systolic == null || diastolic == null
       ? bloodPressureStateLabel
@@ -106,6 +139,14 @@ class PatientTransportSummary {
       respiratoryRateStateLabel: respiratoryRateStateLabel,
       temperatureStateLabel: temperatureStateLabel,
       oxygenSaturationStateLabel: oxygenSaturationStateLabel,
+      glucoseMgDl: glucoseMgDl,
+      leftPupilLabel: leftPupilLabel,
+      rightPupilLabel: rightPupilLabel,
+      medicalHistory: medicalHistory,
+      allergies: allergies,
+      medications: medications,
+      isolationConcern: isolationConcern,
+      supplementalAssessedAt: supplementalAssessedAt,
     );
   }
 
@@ -137,6 +178,14 @@ class PatientTransportSummary {
       respiratoryRateStateLabel: respiratoryRateStateLabel,
       temperatureStateLabel: temperatureStateLabel,
       oxygenSaturationStateLabel: oxygenSaturationStateLabel,
+      glucoseMgDl: glucoseMgDl,
+      leftPupilLabel: leftPupilLabel,
+      rightPupilLabel: rightPupilLabel,
+      medicalHistory: medicalHistory,
+      allergies: allergies,
+      medications: medications,
+      isolationConcern: isolationConcern,
+      supplementalAssessedAt: supplementalAssessedAt,
     );
   }
 }

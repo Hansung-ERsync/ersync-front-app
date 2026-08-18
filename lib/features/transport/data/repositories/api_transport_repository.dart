@@ -75,9 +75,7 @@ class ApiTransportRepository implements TransportRepository {
       );
       final Map<String, Object?> search = _jsonObject(searchResponse.data);
 
-      if (status == 'SEARCHING' ||
-          status == 'CANDIDATES_EXHAUSTED' ||
-          status == 'ACCEPTED_AVAILABLE') {
+      if (status == 'SEARCHING' || status == 'ACCEPTED_AVAILABLE') {
         return ActiveTransportRecovery.search(
           HospitalSearchSession(
             requestId: requestId,
@@ -330,6 +328,9 @@ class ApiTransportRepository implements TransportRepository {
       snapshot['consciousness'],
     );
     final Map<String, Object?> vitalSigns = _jsonObject(snapshot['vitalSigns']);
+    final Map<String, Object?> supplemental =
+        _optionalJsonObject(detail['supplementalAssessment']) ??
+        const <String, Object?>{};
 
     final Map<String, Map<String, Object?>> measurements =
         <String, Map<String, Object?>>{};
@@ -395,7 +396,25 @@ class ApiTransportRepository implements TransportRepository {
       respiratoryRateStateLabel: _measurementStateLabel(respiratoryRate),
       temperatureStateLabel: _measurementStateLabel(temperature),
       oxygenSaturationStateLabel: _measurementStateLabel(oxygenSaturation),
+      glucoseMgDl: _int(supplemental['glucoseMgDl']),
+      leftPupilLabel: _pupilLabel(supplemental['leftPupil']),
+      rightPupilLabel: _pupilLabel(supplemental['rightPupil']),
+      medicalHistory: _optionalString(supplemental['medicalHistory']),
+      allergies: _optionalString(supplemental['allergies']),
+      medications: _optionalString(supplemental['medications']),
+      isolationConcern: supplemental['isolationConcern'] as bool?,
+      supplementalAssessedAt: _nullableDate(supplemental['assessedAt']),
     );
+  }
+
+  String? _pupilLabel(Object? value) {
+    return switch (value) {
+      'NORMAL' => '정상',
+      'SLUGGISH' => '둔함',
+      'FIXED' => '고정',
+      'UNASSESSABLE' => '확인 불가',
+      _ => null,
+    };
   }
 
   AcceptedHospital? _currentDestination(Map<String, Object?> search) {
@@ -420,7 +439,10 @@ class ApiTransportRepository implements TransportRepository {
         offerId: offerId,
         name: _string(offer, 'hospitalName'),
         address: _hospitalAddress(offer),
+        detailAddress: _optionalString(offer['hospitalDetailAddress']),
         emergencyRoomPhone: offer['hospitalContact'] as String? ?? '연락처 정보 없음',
+        latitude: _double(offer['hospitalLatitude']),
+        longitude: _double(offer['hospitalLongitude']),
         distanceMeters: distanceMeters,
         etaMinutes: etaSeconds == null ? null : (etaSeconds / 60).ceil(),
         acceptedAt:
@@ -519,6 +541,19 @@ class ApiTransportRepository implements TransportRepository {
     throw const AppException('서버 응답을 처리할 수 없습니다.', code: 'INVALID_RESPONSE');
   }
 
+  Map<String, Object?>? _optionalJsonObject(Object? value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is Map<String, Object?>) {
+      return value;
+    }
+    if (value is Map<dynamic, dynamic>) {
+      return Map<String, Object?>.from(value);
+    }
+    return null;
+  }
+
   String _string(Map<String, Object?> json, String key) {
     final Object? value = json[key];
     if (value is String && value.isNotEmpty) {
@@ -534,6 +569,11 @@ class ApiTransportRepository implements TransportRepository {
     }
     return '주소 정보 동기화 중';
   }
+
+  String? _optionalString(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
+
+  double? _double(Object? value) => value is num ? value.toDouble() : null;
 
   int? _int(Object? value) => value is num ? value.toInt() : null;
 

@@ -7,11 +7,79 @@ import 'package:er_sync/features/hospital_search/domain/entities/hospital_search
 import 'package:er_sync/features/hospital_search/domain/entities/accepted_hospital.dart';
 import 'package:er_sync/features/hospital_search/domain/entities/hospital_search_session.dart';
 import 'package:er_sync/features/hospital_search/domain/repositories/hospital_search_repository.dart';
+import 'package:er_sync/features/hospital_search/presentation/pages/hospital_search_page.dart';
 import 'package:er_sync/features/hospital_search/presentation/providers/hospital_search_view_model.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('수락 전에는 최대 10초 동안 전송 애니메이션을 유지한다', () {
+    final HospitalSearchSession session = HospitalSearchSession(
+      requestId: 'REQUEST-ANIMATION',
+      startedAt: DateTime.now(),
+      initialRadiusKm: 10,
+      radiusStepKm: 10,
+      expansionIntervalSeconds: 60,
+      maximumRadiusKm: 100,
+    );
+
+    expect(
+      shouldShowHospitalResponseDashboard(
+        session: session,
+        progress: const HospitalSearchProgress(
+          requestId: 'REQUEST-ANIMATION',
+          currentRadiusKm: 10,
+          elapsedSeconds: 9,
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldShowHospitalResponseDashboard(
+        session: session,
+        progress: const HospitalSearchProgress(
+          requestId: 'REQUEST-ANIMATION',
+          currentRadiusKm: 10,
+          elapsedSeconds: 10,
+        ),
+      ),
+      isTrue,
+    );
+  });
+
+  test('10초 전이라도 병원이 수락하면 응답 현황을 즉시 표시한다', () {
+    final HospitalSearchSession session = HospitalSearchSession(
+      requestId: 'REQUEST-EARLY-ACCEPT',
+      startedAt: DateTime.now(),
+      initialRadiusKm: 10,
+      radiusStepKm: 10,
+      expansionIntervalSeconds: 60,
+      maximumRadiusKm: 100,
+    );
+    final HospitalSearchProgress progress = HospitalSearchProgress(
+      requestId: session.requestId,
+      currentRadiusKm: 10,
+      elapsedSeconds: 2,
+      requestStatus: 'ACCEPTED_AVAILABLE',
+      acceptedHospitals: <AcceptedHospital>[
+        AcceptedHospital(
+          offerId: 'OFFER-1',
+          name: '수락 병원',
+          address: '서울특별시 중구',
+          emergencyRoomPhone: '02-0000-0000',
+          distanceMeters: 1000,
+          etaMinutes: 5,
+          acceptedAt: DateTime.now(),
+        ),
+      ],
+    );
+
+    expect(
+      shouldShowHospitalResponseDashboard(session: session, progress: progress),
+      isTrue,
+    );
+  });
+
   test('SSE 신호를 받으면 병원 탐색 REST 상태를 다시 조회한다', () async {
     final StreamController<RealtimeSignal> signals =
         StreamController<RealtimeSignal>.broadcast();
@@ -270,7 +338,4 @@ class _RecordingHospitalSearchRepository implements HospitalSearchRepository {
       throw StateError('lost response');
     }
   }
-
-  @override
-  Future<void> retrySearch(String requestId, String idempotencyKey) async {}
 }

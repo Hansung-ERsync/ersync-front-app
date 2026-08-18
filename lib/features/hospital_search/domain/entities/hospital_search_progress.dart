@@ -1,4 +1,5 @@
 import 'accepted_hospital.dart';
+import 'hospital_response.dart';
 
 class HospitalSearchProgress {
   const HospitalSearchProgress({
@@ -10,8 +11,12 @@ class HospitalSearchProgress {
     this.expansionRemainingSeconds,
     this.nextExpansionAt,
     this.candidateShortage = false,
-    this.exhaustionReason,
+    this.currentDestinationOfferId,
+    this.currentAttemptTriggerType,
     this.acceptedHospitals = const <AcceptedHospital>[],
+    this.pendingHospitals = const <HospitalResponse>[],
+    this.rejectedHospitals = const <HospitalResponse>[],
+    this.withdrawnHospitals = const <HospitalResponse>[],
   });
 
   final String requestId;
@@ -22,12 +27,22 @@ class HospitalSearchProgress {
   final int? expansionRemainingSeconds;
   final DateTime? nextExpansionAt;
   final bool candidateShortage;
-  final String? exhaustionReason;
+  final String? currentDestinationOfferId;
+  final String? currentAttemptTriggerType;
   final List<AcceptedHospital> acceptedHospitals;
+  final List<HospitalResponse> pendingHospitals;
+  final List<HospitalResponse> rejectedHospitals;
+  final List<HospitalResponse> withdrawnHospitals;
 
   bool get isCancelled => requestStatus == 'CANCELLED';
-  bool get isExhausted => requestStatus == 'CANDIDATES_EXHAUSTED';
   bool get isSearching => requestStatus == 'SEARCHING';
+  bool get isWithdrawalRecovery =>
+      currentDestinationOfferId == null &&
+      currentAttemptTriggerType == 'ACCEPTANCE_WITHDRAWAL';
+  bool get hasResponseDashboard =>
+      acceptedHospitals.isNotEmpty ||
+      withdrawnHospitals.isNotEmpty ||
+      isWithdrawalRecovery;
 }
 
 enum TransportCancellationReason {

@@ -4,6 +4,7 @@ import '../../../../core/error/app_exception.dart';
 import '../../../../core/network/authenticated_request.dart';
 import '../../../../core/network/dio_exception_mapper.dart';
 import '../../domain/entities/accepted_hospital.dart';
+import '../../domain/entities/hospital_response.dart';
 import '../../domain/entities/hospital_search_progress.dart';
 import '../../domain/entities/hospital_search_session.dart';
 import '../../domain/repositories/hospital_search_repository.dart';
@@ -48,32 +49,71 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
           ? endedAt ?? serverNow
           : serverNow;
       final List<AcceptedHospital> accepted = <AcceptedHospital>[];
+      final List<HospitalResponse> pending = <HospitalResponse>[];
+      final List<HospitalResponse> rejected = <HospitalResponse>[];
+      final List<HospitalResponse> withdrawn = <HospitalResponse>[];
       final Object? rawOffers = body['offers'];
       if (rawOffers is List<Object?>) {
         for (final Object? rawOffer in rawOffers) {
           final Map<String, Object?> offer = _jsonObject(rawOffer);
-          if (offer['status'] != 'ACCEPTED') {
-            continue;
-          }
+          final String status = _requiredString(offer, 'status');
           final int? distanceMeters =
               _int(offer['routeDistanceMeters']) ??
               _int(offer['straightLineDistanceMeters']);
           final int? etaSeconds = _int(offer['etaSeconds']);
-          accepted.add(
-            AcceptedHospital(
-              offerId: _requiredString(offer, 'offerId'),
-              name: _requiredString(offer, 'hospitalName'),
-              address: _hospitalAddress(offer),
-              emergencyRoomPhone:
-                  offer['hospitalContact'] as String? ?? '연락처 정보 없음',
-              distanceMeters: distanceMeters,
-              etaMinutes: etaSeconds == null ? null : (etaSeconds / 60).ceil(),
-              acceptedAt:
-                  _dateTime(offer['respondedAt']) ??
-                  _dateTime(offer['offeredAt']) ??
-                  serverNow,
-            ),
+          if (status == 'ACCEPTED') {
+            accepted.add(
+              AcceptedHospital(
+                offerId: _requiredString(offer, 'offerId'),
+                name: _requiredString(offer, 'hospitalName'),
+                address: _hospitalAddress(offer),
+                detailAddress: _optionalString(offer['hospitalDetailAddress']),
+                emergencyRoomPhone:
+                    _optionalString(offer['hospitalContact']) ?? '연락처 정보 없음',
+                latitude: _double(offer['hospitalLatitude']),
+                longitude: _double(offer['hospitalLongitude']),
+                distanceMeters: distanceMeters,
+                etaMinutes: etaSeconds == null
+                    ? null
+                    : (etaSeconds / 60).ceil(),
+                acceptedAt:
+                    _dateTime(offer['respondedAt']) ??
+                    _dateTime(offer['offeredAt']) ??
+                    serverNow,
+              ),
+            );
+            continue;
+          }
+          final HospitalResponse response = HospitalResponse(
+            offerId: _requiredString(offer, 'offerId'),
+            name: _requiredString(offer, 'hospitalName'),
+            status: switch (status) {
+              'PENDING' => HospitalResponseStatus.pending,
+              'REJECTED' => HospitalResponseStatus.rejected,
+              'ACCEPTANCE_WITHDRAWN' =>
+                HospitalResponseStatus.acceptanceWithdrawn,
+              'NO_RESPONSE' => HospitalResponseStatus.noResponse,
+              _ => HospitalResponseStatus.pending,
+            },
+            distanceMeters: distanceMeters,
+            etaMinutes: etaSeconds == null ? null : (etaSeconds / 60).ceil(),
+            offeredAt: _dateTime(offer['offeredAt']) ?? serverNow,
+            respondedAt: _dateTime(offer['respondedAt']),
+            withdrawnAt: _dateTime(offer['withdrawnAt']),
+            rejectionReason: _optionalString(offer['rejectionReason']),
+            rejectionDetail: _optionalString(offer['rejectionDetail']),
+            withdrawalReason: _optionalString(offer['withdrawalReason']),
+            withdrawalDetail: _optionalString(offer['withdrawalDetail']),
           );
+          switch (response.status) {
+            case HospitalResponseStatus.pending:
+              pending.add(response);
+            case HospitalResponseStatus.rejected ||
+                HospitalResponseStatus.noResponse:
+              rejected.add(response);
+            case HospitalResponseStatus.acceptanceWithdrawn:
+              withdrawn.add(response);
+          }
         }
       }
       return HospitalSearchProgress(
@@ -87,7 +127,10 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
             : null,
         nextExpansionAt: requestStatus == 'SEARCHING' ? nextExpansionAt : null,
         candidateShortage: attempt?['candidateShortage'] == true,
-        exhaustionReason: body['exhaustionReason'] as String?,
+        currentDestinationOfferId: _optionalString(
+          body['currentDestinationOfferId'],
+        ),
+        currentAttemptTriggerType: _optionalString(attempt?['triggerType']),
         currentRadiusKm:
             _int(attempt?['currentRadiusKm']) ?? session.initialRadiusKm,
         elapsedSeconds: elapsedUntil
@@ -96,6 +139,9 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
             .clamp(0, 86400)
             .toInt(),
         acceptedHospitals: accepted,
+        pendingHospitals: pending,
+        rejectedHospitals: rejected,
+        withdrawnHospitals: withdrawn,
       );
     });
   }
@@ -110,17 +156,6 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
       await _dio.post<Object?>(
         '/api/v1/transport-requests/$requestId/destination',
         data: <String, Object>{'offerId': offerId},
-        options: _options(idempotencyKey: idempotencyKey),
-      );
-    });
-  }
-
-  @override
-  Future<void> retrySearch(String requestId, String idempotencyKey) {
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/dispatch-attempts',
-        data: const <String, Object>{},
         options: _options(idempotencyKey: idempotencyKey),
       );
     });
@@ -182,6 +217,11 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
   }
 
   int? _int(Object? value) => value is num ? value.toInt() : null;
+
+  double? _double(Object? value) => value is num ? value.toDouble() : null;
+
+  String? _optionalString(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : null;
 
   DateTime? _dateTime(Object? value) {
     return value is String ? DateTime.tryParse(value)?.toLocal() : null;

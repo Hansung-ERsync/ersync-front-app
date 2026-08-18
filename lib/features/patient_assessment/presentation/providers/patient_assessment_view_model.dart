@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/error/app_exception.dart';
 import '../../../../core/idempotency/idempotency_providers.dart';
+import '../../../../core/location/device_location.dart';
 import '../../../../core/location/location_providers.dart';
 import '../../../../core/network/api_providers.dart';
 import '../../../auth/data/datasources/mock_auth_data_source.dart';
@@ -93,7 +94,7 @@ final AsyncNotifierProvider<
   PatientAssessmentViewState
 >
 patientAssessmentViewModelProvider =
-    AsyncNotifierProvider<
+    AsyncNotifierProvider.autoDispose<
       PatientAssessmentViewModel,
       PatientAssessmentViewState
     >(PatientAssessmentViewModel.new);
@@ -101,14 +102,137 @@ patientAssessmentViewModelProvider =
 class PatientAssessmentViewModel
     extends AsyncNotifier<PatientAssessmentViewState> {
   Timer? _draftSaveTimer;
+  bool _isDisposed = false;
+  bool _isDiscarding = false;
+  bool _hasUserEdits = false;
 
   @override
-  Future<PatientAssessmentViewState> build() async {
-    ref.onDispose(() => _draftSaveTimer?.cancel());
-    final PatientAssessmentDraft draft = await ref
-        .watch(loadPatientAssessmentDraftProvider)
-        .call();
-    return PatientAssessmentViewState(draft: draft);
+  PatientAssessmentViewState build() {
+    ref.onDispose(() {
+      _isDisposed = true;
+      _draftSaveTimer?.cancel();
+    });
+    final AuthUser? user = ref.watch(
+      authViewModelProvider.select((AuthState state) => state.user),
+    );
+    final PatientAssessmentDraft initialDraft = _createPreparingDraft(
+      callbackContact:
+          user?.callbackContact ?? MockAuthDataSource.mockCallbackContact,
+      clientRequestKey: ref
+          .watch(idempotencyKeyGeneratorProvider)
+          .create('transport'),
+    );
+    final LoadPatientAssessmentDraft loader = ref.watch(
+      loadPatientAssessmentDraftProvider,
+    );
+    Future<void>.microtask(() => _initializeDraft(loader));
+    return PatientAssessmentViewState(
+      draft: initialDraft,
+      isPreparingRequest: true,
+      isDraftReady: false,
+    );
+  }
+
+  Future<void> retryPreparation() async {
+    final PatientAssessmentViewState current = state.requireValue;
+    if (current.isPreparingRequest || _isDiscarding) {
+      return;
+    }
+    _setViewState(
+      current.copyWith(
+        isPreparingRequest: true,
+        isDraftReady: false,
+        clearPreparationError: true,
+        clearError: true,
+      ),
+    );
+    await _initializeDraft(ref.read(loadPatientAssessmentDraftProvider));
+  }
+
+  Future<void> _initializeDraft(LoadPatientAssessmentDraft loader) async {
+    try {
+      final PatientAssessmentDraft loaded = await loader.call();
+      if (_isDisposed || _isDiscarding) {
+        return;
+      }
+      final PatientAssessmentViewState current = state.requireValue;
+      final PatientAssessmentDraft merged = _hasUserEdits
+          ? current.draft.copyWith(
+              assessmentProtocolVersion: loaded.assessmentProtocolVersion,
+              preKtasStandardVersion: loaded.preKtasStandardVersion,
+              clientRequestKey: loaded.clientRequestKey,
+              sceneAddress: loaded.sceneAddress,
+              latitude: loaded.latitude,
+              longitude: loaded.longitude,
+              locationSource: loaded.locationSource,
+              callbackContact: loaded.callbackContact,
+              enteredAt: loaded.enteredAt,
+            )
+          : loaded;
+      final bool requiresCurrentLocation = loaded.sceneAddress == '최근 GPS 위치';
+      _setViewState(
+        current.copyWith(
+          draft: merged,
+          isPreparingRequest: requiresCurrentLocation,
+          isDraftReady: !requiresCurrentLocation,
+          clearPreparationError: true,
+        ),
+      );
+      if (requiresCurrentLocation) {
+        await _refreshCurrentLocation();
+      } else if (_hasUserEdits) {
+        unawaited(ref.read(savePatientAssessmentDraftProvider)(merged));
+      }
+    } on AppException catch (error) {
+      _setPreparationError(error.message);
+    } on Object {
+      _setPreparationError('요청 정보를 준비하지 못했습니다. 다시 시도해주세요.');
+    }
+  }
+
+  Future<void> _refreshCurrentLocation() async {
+    try {
+      final DeviceLocationPoint location = await ref
+          .read(deviceLocationServiceProvider)
+          .getCurrentLocation();
+      if (_isDisposed || _isDiscarding) {
+        return;
+      }
+      final PatientAssessmentViewState current = state.requireValue;
+      final PatientAssessmentDraft updated = current.draft.copyWith(
+        sceneAddress: '현재 GPS 위치',
+        latitude: location.latitude,
+        longitude: location.longitude,
+        locationSource: 'GPS',
+      );
+      _setViewState(
+        current.copyWith(
+          draft: updated,
+          isPreparingRequest: false,
+          isDraftReady: true,
+          clearPreparationError: true,
+        ),
+      );
+      unawaited(ref.read(savePatientAssessmentDraftProvider)(updated));
+    } on AppException catch (error) {
+      _setPreparationError(error.message);
+    } on Object {
+      _setPreparationError('현재 GPS 위치를 확인하지 못했습니다. 다시 시도해주세요.');
+    }
+  }
+
+  void _setPreparationError(String message) {
+    if (_isDisposed || _isDiscarding) {
+      return;
+    }
+    final PatientAssessmentViewState current = state.requireValue;
+    _setViewState(
+      current.copyWith(
+        isPreparingRequest: false,
+        isDraftReady: false,
+        preparationErrorMessage: message,
+      ),
+    );
   }
 
   void setAgeStatus(AgeStatus value) {
@@ -500,6 +624,16 @@ class PatientAssessmentViewModel
       return false;
     }
 
+    if (!current.isDraftReady) {
+      _setViewState(
+        current.copyWith(
+          step: (current.step + 1).clamp(0, current.totalSteps - 1),
+          clearError: true,
+        ),
+      );
+      return true;
+    }
+
     _setViewState(current.copyWith(isSaving: true, clearError: true));
     try {
       await ref.read(savePatientAssessmentDraftProvider)(current.draft);
@@ -531,6 +665,17 @@ class PatientAssessmentViewModel
 
   Future<TransferRequestReceipt?> submit() async {
     final PatientAssessmentViewState current = state.requireValue;
+    if (!current.isDraftReady) {
+      _setViewState(
+        current.copyWith(
+          errorMessage: current.isPreparingRequest
+              ? '최신 GPS 위치를 확인하고 있습니다. 잠시만 기다려주세요.'
+              : current.preparationErrorMessage ??
+                    '전송 준비를 완료하지 못했습니다. 위치를 다시 확인해주세요.',
+        ),
+      );
+      return null;
+    }
     for (int step = 0; step < current.totalSteps; step++) {
       final _AssessmentValidationIssue? issue = _validateStep(
         step,
@@ -548,12 +693,14 @@ class PatientAssessmentViewModel
       }
     }
 
+    final PatientAssessmentDraft submissionDraft = current.draft;
     _setViewState(current.copyWith(isSubmitting: true, clearError: true));
     try {
       _draftSaveTimer?.cancel();
+      await ref.read(savePatientAssessmentDraftProvider).call(submissionDraft);
       final TransferRequestReceipt receipt = await ref
           .read(submitTransferRequestProvider)
-          .call(current.draft);
+          .call(submissionDraft);
       await ref.read(clearPatientAssessmentDraftProvider).call();
       _setViewState(
         current.copyWith(
@@ -568,7 +715,21 @@ class PatientAssessmentViewModel
         current.copyWith(isSubmitting: false, errorMessage: error.message),
       );
       return null;
+    } on Object {
+      _setViewState(
+        current.copyWith(
+          isSubmitting: false,
+          errorMessage: '이송 요청 정보를 안전하게 저장하지 못했습니다. 다시 시도해주세요.',
+        ),
+      );
+      return null;
     }
+  }
+
+  Future<void> discardDraft() async {
+    _isDiscarding = true;
+    _draftSaveTimer?.cancel();
+    await ref.read(clearPatientAssessmentDraftProvider).call();
   }
 
   void _updateVital(
@@ -602,8 +763,12 @@ class PatientAssessmentViewModel
   ) {
     final PatientAssessmentViewState current = state.requireValue;
     final PatientAssessmentDraft updated = update(current.draft);
+    _hasUserEdits = true;
     _setViewState(current.copyWith(draft: updated, clearError: true));
     _draftSaveTimer?.cancel();
+    if (!current.isDraftReady) {
+      return;
+    }
     _draftSaveTimer = Timer(const Duration(milliseconds: 300), () {
       unawaited(ref.read(savePatientAssessmentDraftProvider)(updated));
     });
@@ -925,6 +1090,9 @@ class PatientAssessmentViewState {
     this.step = 0,
     this.isSaving = false,
     this.isSubmitting = false,
+    this.isPreparingRequest = false,
+    this.isDraftReady = true,
+    this.preparationErrorMessage,
     this.errorMessage,
     this.validationTarget,
     this.receipt,
@@ -936,6 +1104,9 @@ class PatientAssessmentViewState {
   final int step;
   final bool isSaving;
   final bool isSubmitting;
+  final bool isPreparingRequest;
+  final bool isDraftReady;
+  final String? preparationErrorMessage;
   final String? errorMessage;
   final AssessmentValidationTarget? validationTarget;
   final TransferRequestReceipt? receipt;
@@ -949,16 +1120,25 @@ class PatientAssessmentViewState {
     int? step,
     bool? isSaving,
     bool? isSubmitting,
+    bool? isPreparingRequest,
+    bool? isDraftReady,
+    String? preparationErrorMessage,
     String? errorMessage,
     AssessmentValidationTarget? validationTarget,
     TransferRequestReceipt? receipt,
     bool clearError = false,
+    bool clearPreparationError = false,
   }) {
     return PatientAssessmentViewState(
       draft: draft ?? this.draft,
       step: step ?? this.step,
       isSaving: isSaving ?? this.isSaving,
       isSubmitting: isSubmitting ?? this.isSubmitting,
+      isPreparingRequest: isPreparingRequest ?? this.isPreparingRequest,
+      isDraftReady: isDraftReady ?? this.isDraftReady,
+      preparationErrorMessage: clearPreparationError
+          ? null
+          : preparationErrorMessage ?? this.preparationErrorMessage,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
       validationTarget: clearError
           ? null
@@ -966,6 +1146,57 @@ class PatientAssessmentViewState {
       receipt: receipt ?? this.receipt,
     );
   }
+}
+
+PatientAssessmentDraft _createPreparingDraft({
+  required String callbackContact,
+  required String clientRequestKey,
+}) {
+  final DateTime now = DateTime.now();
+  return PatientAssessmentDraft(
+    assessmentProtocolVersion: '',
+    preKtasStandardVersion: '',
+    clientRequestKey: clientRequestKey,
+    sceneAddress: '현재 위치 확인 중',
+    latitude: 0,
+    longitude: 0,
+    locationSource: 'GPS',
+    callbackContact: callbackContact,
+    ageStatus: null,
+    ageYears: null,
+    sex: null,
+    occurrenceType: null,
+    occurrenceDetail: '',
+    mechanism: null,
+    injurySites: const <InjurySite>{},
+    primarySymptom: null,
+    primarySymptomDetail: '',
+    secondarySymptoms: const <PatientSymptom>{},
+    onsetTimeStatus: null,
+    onsetAt: null,
+    classificationStatus: null,
+    preKtasLevel: null,
+    exceptionReason: null,
+    exceptionDetail: '',
+    avpu: null,
+    unassessableReason: null,
+    unassessableDetail: '',
+    assessedAt: now,
+    observedAt: now,
+    vitals: const <VitalType, VitalReadingDraft>{},
+    measuredAt: now,
+    treatments: const <TreatmentType>{},
+    treatmentEntries: const <TreatmentType, TreatmentEntryDraft>{},
+    performedAt: now,
+    glucoseMgDl: null,
+    leftPupil: null,
+    rightPupil: null,
+    medicalHistory: '',
+    allergies: '',
+    medications: '',
+    isolationConcern: null,
+    enteredAt: now,
+  );
 }
 
 class _AssessmentValidationIssue {

@@ -72,7 +72,6 @@ class HospitalSearchViewModel extends Notifier<HospitalSearchViewState> {
   bool _isRefreshing = false;
   String? _pendingDestinationOfferId;
   String? _pendingDestinationKey;
-  String? _pendingRetryKey;
 
   @override
   HospitalSearchViewState build() {
@@ -157,8 +156,12 @@ class HospitalSearchViewModel extends Notifier<HospitalSearchViewState> {
                     .toInt(),
           nextExpansionAt: progress.nextExpansionAt,
           candidateShortage: progress.candidateShortage,
-          exhaustionReason: progress.exhaustionReason,
+          currentDestinationOfferId: progress.currentDestinationOfferId,
+          currentAttemptTriggerType: progress.currentAttemptTriggerType,
           acceptedHospitals: progress.acceptedHospitals,
+          pendingHospitals: progress.pendingHospitals,
+          rejectedHospitals: progress.rejectedHospitals,
+          withdrawnHospitals: progress.withdrawnHospitals,
         ),
       );
       if (progress.expansionRemainingSeconds == 1) {
@@ -288,34 +291,6 @@ class HospitalSearchViewModel extends Notifier<HospitalSearchViewState> {
     }
   }
 
-  Future<bool> retrySearch() async {
-    final HospitalSearchSession? session = state.session;
-    if (session == null ||
-        state.isRetrying ||
-        state.progress?.isExhausted != true) {
-      return false;
-    }
-    state = state.copyWith(isRetrying: true, clearError: true);
-    _pendingRetryKey ??= ref
-        .read(idempotencyKeyGeneratorProvider)
-        .create('search-retry');
-    try {
-      await ref
-          .read(hospitalSearchRepositoryProvider)
-          .retrySearch(session.requestId, _pendingRetryKey!);
-      _pendingRetryKey = null;
-      await _refresh();
-      state = state.copyWith(isRetrying: false, clearError: true);
-      return true;
-    } catch (_) {
-      state = state.copyWith(
-        isRetrying: false,
-        errorMessage: '병원 검색을 다시 시작하지 못했습니다. 잠시 후 재시도해주세요.',
-      );
-      return false;
-    }
-  }
-
   void stop() {
     _stopRefreshChannels();
   }
@@ -328,7 +303,6 @@ class HospitalSearchViewState {
     this.isCancelling = false,
     this.isCancelled = false,
     this.isSelectingDestination = false,
-    this.isRetrying = false,
     this.errorMessage,
   });
 
@@ -337,7 +311,6 @@ class HospitalSearchViewState {
   final bool isCancelling;
   final bool isCancelled;
   final bool isSelectingDestination;
-  final bool isRetrying;
   final String? errorMessage;
 
   HospitalSearchViewState copyWith({
@@ -345,7 +318,6 @@ class HospitalSearchViewState {
     bool? isCancelling,
     bool? isCancelled,
     bool? isSelectingDestination,
-    bool? isRetrying,
     String? errorMessage,
     bool clearError = false,
   }) {
@@ -356,7 +328,6 @@ class HospitalSearchViewState {
       isCancelled: isCancelled ?? this.isCancelled,
       isSelectingDestination:
           isSelectingDestination ?? this.isSelectingDestination,
-      isRetrying: isRetrying ?? this.isRetrying,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
     );
   }

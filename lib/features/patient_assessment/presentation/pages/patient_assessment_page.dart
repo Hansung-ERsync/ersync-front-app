@@ -26,11 +26,15 @@ class PatientAssessmentPage extends ConsumerWidget {
     final AsyncValue<PatientAssessmentViewState> asyncState = ref.watch(
       patientAssessmentViewModelProvider,
     );
+    Future<void> discardDraft() =>
+        ref.read(patientAssessmentViewModelProvider.notifier).discardDraft();
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: asyncState.when(
+          skipLoadingOnRefresh: false,
+          skipLoadingOnReload: false,
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (Object error, StackTrace stackTrace) => _LoadError(
             onRetry: () => ref.invalidate(patientAssessmentViewModelProvider),
@@ -39,6 +43,7 @@ class PatientAssessmentPage extends ConsumerWidget {
           data: (PatientAssessmentViewState state) => _AssessmentBody(
             state: state,
             viewModel: ref.read(patientAssessmentViewModelProvider.notifier),
+            onExit: discardDraft,
           ),
         ),
       ),
@@ -47,10 +52,15 @@ class PatientAssessmentPage extends ConsumerWidget {
 }
 
 class _AssessmentBody extends StatefulWidget {
-  const _AssessmentBody({required this.state, required this.viewModel});
+  const _AssessmentBody({
+    required this.state,
+    required this.viewModel,
+    required this.onExit,
+  });
 
   final PatientAssessmentViewState state;
   final PatientAssessmentViewModel viewModel;
+  final Future<void> Function() onExit;
 
   @override
   State<_AssessmentBody> createState() => _AssessmentBodyState();
@@ -59,6 +69,7 @@ class _AssessmentBody extends StatefulWidget {
 class _AssessmentBodyState extends State<_AssessmentBody> {
   late final ScrollController _scrollController;
   Timer? _validationTimer;
+  bool _isExiting = false;
 
   PatientAssessmentViewState get state => widget.state;
   PatientAssessmentViewModel get viewModel => widget.viewModel;
@@ -107,9 +118,14 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
   Widget build(BuildContext context) {
     final bool isStepValid = viewModel.isStepValid(state.step, state.draft);
     return PopScope(
-      canPop: state.step == 0,
+      canPop: _isExiting,
       onPopInvokedWithResult: (bool didPop, Object? result) {
-        if (!didPop) {
+        if (didPop) {
+          return;
+        }
+        if (state.step == 0) {
+          unawaited(_discardDraftAndExit());
+        } else {
           viewModel.previousStep();
         }
       },
@@ -121,7 +137,7 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
             totalSteps: state.totalSteps,
             onBack: () {
               if (state.step == 0) {
-                context.pop();
+                unawaited(_discardDraftAndExit());
               } else {
                 viewModel.previousStep();
               }
@@ -135,7 +151,12 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  _LocationBanner(address: state.draft.sceneAddress),
+                  _LocationBanner(
+                    address: state.draft.sceneAddress,
+                    isPreparing: state.isPreparingRequest,
+                    errorMessage: state.preparationErrorMessage,
+                    onRetry: viewModel.retryPreparation,
+                  ),
                   if (state.errorMessage != null &&
                       state.validationTarget == null) ...<Widget>[
                     const SizedBox(height: 12),
@@ -156,12 +177,33 @@ class _AssessmentBodyState extends State<_AssessmentBody> {
           _BottomAction(
             isLastStep: state.step == state.totalSteps - 1,
             isBusy: state.isBusy,
-            isEnabled: isStepValid,
+            isEnabled:
+                isStepValid &&
+                (state.step < state.totalSteps - 1 || state.isDraftReady),
+            disabledMessage:
+                isStepValid &&
+                    state.step == state.totalSteps - 1 &&
+                    !state.isDraftReady
+                ? state.isPreparingRequest
+                      ? '최신 GPS 위치를 확인하면 이송 요청을 보낼 수 있습니다.'
+                      : '위치 확인을 다시 시도한 뒤 이송 요청을 보내주세요.'
+                : null,
             onPressed: () => _handlePrimaryAction(context),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _discardDraftAndExit() async {
+    if (_isExiting) {
+      return;
+    }
+    setState(() => _isExiting = true);
+    await widget.onExit();
+    if (mounted) {
+      context.pop();
+    }
   }
 
   Widget _buildStep() {
@@ -458,45 +500,102 @@ class _AssessmentHeader extends StatelessWidget {
 }
 
 class _LocationBanner extends StatelessWidget {
-  const _LocationBanner({required this.address});
+  const _LocationBanner({
+    required this.address,
+    required this.isPreparing,
+    required this.errorMessage,
+    required this.onRetry,
+  });
 
   final String address;
+  final bool isPreparing;
+  final String? errorMessage;
+  final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
+    final bool hasError = errorMessage != null;
+    final Color foreground = hasError
+        ? AppColors.statusNegative
+        : isPreparing
+        ? AppColors.statusChecking
+        : AppColors.statusPositive;
+    final Color background = hasError
+        ? AppColors.negativeBackground
+        : isPreparing
+        ? AppColors.checkingBackground
+        : AppColors.positiveBackground;
+    final Color border = hasError
+        ? AppColors.negativeBorder
+        : isPreparing
+        ? AppColors.checkingBorder
+        : AppColors.positiveBorder;
+    final String label = hasError
+        ? '전송 준비 필요'
+        : isPreparing
+        ? 'GPS 확인 중'
+        : 'GPS 연결됨';
+    final String detail = hasError
+        ? errorMessage!
+        : isPreparing
+        ? '입력은 바로 시작할 수 있습니다.'
+        : address;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       decoration: BoxDecoration(
-        color: AppColors.positiveBackground,
-        border: Border.all(color: AppColors.positiveBorder),
+        color: background,
+        border: Border.all(color: border),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: <Widget>[
-          const Icon(
-            Icons.location_on_outlined,
-            color: AppColors.statusPositive,
-            size: 18,
-          ),
+          if (isPreparing && !hasError)
+            SizedBox.square(
+              dimension: 17,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: foreground,
+              ),
+            )
+          else
+            Icon(
+              hasError
+                  ? Icons.location_off_outlined
+                  : Icons.location_on_outlined,
+              color: foreground,
+              size: 18,
+            ),
           const SizedBox(width: 8),
           Text(
-            'GPS 연결됨',
+            label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: AppColors.statusPositive,
+              color: foreground,
               fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              address,
+              detail,
+              maxLines: hasError ? 2 : 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(
                 context,
-              ).textTheme.bodySmall?.copyWith(color: AppColors.statusPositive),
+              ).textTheme.bodySmall?.copyWith(color: foreground),
             ),
           ),
+          if (hasError) ...<Widget>[
+            const SizedBox(width: 4),
+            IconButton(
+              key: const Key('retryAssessmentPreparationButton'),
+              tooltip: '다시 시도',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => unawaited(onRetry()),
+              icon: const Icon(Icons.refresh_rounded),
+              color: foreground,
+            ),
+          ],
         ],
       ),
     );
@@ -543,12 +642,14 @@ class _BottomAction extends StatelessWidget {
     required this.isLastStep,
     required this.isBusy,
     required this.isEnabled,
+    this.disabledMessage,
     required this.onPressed,
   });
 
   final bool isLastStep;
   final bool isBusy;
   final bool isEnabled;
+  final String? disabledMessage;
   final VoidCallback onPressed;
 
   @override
@@ -564,9 +665,12 @@ class _BottomAction extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           if (!isEnabled && !isBusy) ...<Widget>[
-            const Text(
-              '필수 항목을 모두 입력하면 다음으로 이동할 수 있습니다.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            Text(
+              disabledMessage ?? '필수 항목을 모두 입력하면 다음으로 이동할 수 있습니다.',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 12,
+              ),
             ),
             const SizedBox(height: 8),
           ],

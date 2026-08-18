@@ -9,6 +9,7 @@ class HospitalSearchSession {
     required this.expansionIntervalSeconds,
     required this.maximumRadiusKm,
     this.patientSummary = const PatientTransportSummary.empty(),
+    this.isDestinationRecovery = false,
   });
 
   final String requestId;
@@ -18,4 +19,5 @@ class HospitalSearchSession {
   final int expansionIntervalSeconds;
   final int maximumRadiusKm;
   final PatientTransportSummary patientSummary;
+  final bool isDestinationRecovery;
 }

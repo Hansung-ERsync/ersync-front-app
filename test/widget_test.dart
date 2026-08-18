@@ -200,7 +200,9 @@ void main() {
     expect(find.byKey(const Key('recentTransportsMoreButton')), findsNothing);
   });
 
-  testWidgets('최근 이송은 3건 이후 더보기와 접기로 전환한다', (WidgetTester tester) async {
+  testWidgets('홈 최근 이송은 최신 3건만 표시하고 더보기를 제공하지 않는다', (
+    WidgetTester tester,
+  ) async {
     final List<RecentTransport> transports = List<RecentTransport>.generate(
       5,
       (int index) => RecentTransport(
@@ -224,20 +226,8 @@ void main() {
     expect(find.byKey(const Key('recentTransport_REQUEST-0')), findsOneWidget);
     expect(find.byKey(const Key('recentTransport_REQUEST-2')), findsOneWidget);
     expect(find.byKey(const Key('recentTransport_REQUEST-3')), findsNothing);
-    expect(find.text('더보기 (2)'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('recentTransportsMoreButton')));
-    await tester.pump();
-    expect(find.byKey(const Key('recentTransport_REQUEST-4')), findsOneWidget);
-    expect(find.text('접기'), findsOneWidget);
-
-    await tester.ensureVisible(
-      find.byKey(const Key('recentTransportsMoreButton')),
-    );
-    await tester.tap(find.byKey(const Key('recentTransportsMoreButton')));
-    await tester.pump();
-    expect(find.byKey(const Key('recentTransport_REQUEST-3')), findsNothing);
-    expect(find.text('더보기 (2)'), findsOneWidget);
+    expect(find.byKey(const Key('recentTransport_REQUEST-4')), findsNothing);
+    expect(find.byKey(const Key('recentTransportsMoreButton')), findsNothing);
   });
 
   testWidgets('빈 로그인 폼을 제출하면 필수값 오류를 표시한다', (WidgetTester tester) async {
@@ -316,10 +306,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('환자 기본 정보'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('ageStatus_UNKNOWN')));
+    await tester.pump(const Duration(milliseconds: 400));
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.text('환자 기본 정보')),
+    );
+    expect(
+      container
+          .read(patientAssessmentViewModelProvider)
+          .requireValue
+          .draft
+          .ageStatus,
+      AgeStatus.unknown,
+    );
+
     await tester.tap(find.byKey(const Key('assessmentBackButton')));
     await tester.pumpAndSettle();
     expect(find.byType(HomePage), findsOneWidget);
     expect(find.text('환자 기본 정보'), findsNothing);
+    final clearedDraftFuture = container
+        .read(patientAssessmentRepositoryProvider)
+        .loadDraft();
+    await tester.pump(const Duration(milliseconds: 300));
+    final clearedDraft = await clearedDraftFuture;
+    expect(clearedDraft.ageStatus, isNull);
   });
 
   testWidgets('가입 코드로 새 구급대원 계정을 생성한다', (WidgetTester tester) async {
@@ -1244,7 +1254,24 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
 
-    expect(find.text('수락 병원 선택'), findsOneWidget);
+    expect(find.text('병원 응답 현황'), findsOneWidget);
+    expect(find.text('수락 1'), findsOneWidget);
+    expect(find.text('응답 대기 0'), findsOneWidget);
+    expect(find.text('거절 0'), findsOneWidget);
+    expect(find.text('수락한 병원을 목적지로 선택하거나 다른 병원의 응답 상태를 확인하세요.'), findsNothing);
+    expect(find.text('새로운 목적지를 찾고 있습니다'), findsNothing);
+
+    await tester.tap(find.text('응답 대기 0'));
+    await tester.pumpAndSettle();
+    expect(find.text('응답 대기 중인 병원이 이 화면에 바로 표시됩니다.'), findsOneWidget);
+    expect(find.byIcon(Icons.mark_email_read_outlined), findsNothing);
+
+    await tester.tap(find.text('거절 0'));
+    await tester.pumpAndSettle();
+    expect(find.text('거절하거나 철회한 병원이 이 화면에 바로 표시됩니다.'), findsOneWidget);
+
+    await tester.tap(find.text('수락 1'));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('acceptedHospitalStatusBar')), findsOneWidget);
     expect(find.byKey(const Key('acceptedHospitalList')), findsOneWidget);
     expect(
@@ -1454,7 +1481,7 @@ void main() {
     expect(find.text('인계 대기 중'), findsNothing);
     expect(find.byKey(const Key('handoffStatus_requested')), findsNothing);
     expect(find.text('인계 완료'), findsNWidgets(3));
-    expect(find.text('더보기 (1)'), findsOneWidget);
+    expect(find.byKey(const Key('recentTransportsMoreButton')), findsNothing);
     statusBadge = tester.widget<Container>(
       find.descendant(
         of: currentTransport,
@@ -1537,6 +1564,14 @@ void main() {
     expect(find.byKey(const Key('dismissAppGuideButton')), findsNothing);
 
     await tester.tap(find.byKey(const Key('settingsButton')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('handoffHistorySettingsTile')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('handoffHistorySettingsTile')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('handoffHistoryList')), findsOneWidget);
+    expect(find.text('전체 인계 기록'), findsOneWidget);
+    expect(find.byKey(const Key('recentTransportsMoreButton')), findsNothing);
+    await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('appGuideSettingsTile')), findsOneWidget);
     await tester.tap(find.byKey(const Key('appGuideSettingsTile')));

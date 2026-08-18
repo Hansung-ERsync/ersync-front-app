@@ -153,6 +153,14 @@ class PatientAssessmentDraft {
   final DateTime enteredAt;
 
   PatientAssessmentDraft copyWith({
+    String? assessmentProtocolVersion,
+    String? preKtasStandardVersion,
+    String? clientRequestKey,
+    String? sceneAddress,
+    double? latitude,
+    double? longitude,
+    String? locationSource,
+    String? callbackContact,
     AgeStatus? ageStatus,
     Object? ageYears = _notProvided,
     PatientSex? sex,
@@ -186,16 +194,19 @@ class PatientAssessmentDraft {
     String? allergies,
     String? medications,
     Object? isolationConcern = _notProvided,
+    DateTime? enteredAt,
   }) {
     return PatientAssessmentDraft(
-      assessmentProtocolVersion: assessmentProtocolVersion,
-      preKtasStandardVersion: preKtasStandardVersion,
-      clientRequestKey: clientRequestKey,
-      sceneAddress: sceneAddress,
-      latitude: latitude,
-      longitude: longitude,
-      locationSource: locationSource,
-      callbackContact: callbackContact,
+      assessmentProtocolVersion:
+          assessmentProtocolVersion ?? this.assessmentProtocolVersion,
+      preKtasStandardVersion:
+          preKtasStandardVersion ?? this.preKtasStandardVersion,
+      clientRequestKey: clientRequestKey ?? this.clientRequestKey,
+      sceneAddress: sceneAddress ?? this.sceneAddress,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      locationSource: locationSource ?? this.locationSource,
+      callbackContact: callbackContact ?? this.callbackContact,
       ageStatus: ageStatus ?? this.ageStatus,
       ageYears: identical(ageYears, _notProvided)
           ? this.ageYears
@@ -261,7 +272,7 @@ class PatientAssessmentDraft {
       isolationConcern: identical(isolationConcern, _notProvided)
           ? this.isolationConcern
           : isolationConcern as bool?,
-      enteredAt: enteredAt,
+      enteredAt: enteredAt ?? this.enteredAt,
     );
   }
 }

@@ -9,12 +9,17 @@ import '../../../../core/network/api_providers.dart';
 import '../../../../core/idempotency/idempotency_providers.dart';
 import '../../../../core/location/device_location.dart';
 import '../../../../core/location/location_providers.dart';
+import '../../../../core/realtime/realtime_providers.dart';
+import '../../../../core/realtime/realtime_signal.dart';
+import '../../../hospital_search/domain/entities/hospital_search_session.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
+import '../../../hospital_search/presentation/providers/hospital_search_view_model.dart';
 import '../../domain/entities/in_transit_clinical_updates.dart';
 import '../../domain/entities/in_transit_vital_update.dart';
 import '../../domain/entities/patient_transport_summary.dart';
 import '../../domain/entities/transport_session.dart';
 import '../../domain/entities/transport_location_update.dart';
+import '../../domain/entities/urgent_destination_withdrawal.dart';
 import '../../domain/repositories/transport_repository.dart';
 import '../../domain/usecases/add_in_transit_vital_update.dart';
 import '../../domain/usecases/request_handoff.dart';
@@ -57,7 +62,13 @@ transportViewModelProvider =
 class TransportViewModel extends Notifier<TransportViewState> {
   Timer? _timer;
   Timer? _locationTimer;
+  Timer? _destinationStatusTimer;
+  StreamSubscription<RealtimeSignal>? _realtimeSubscription;
   bool _isSendingLocation = false;
+  bool _isCheckingDestination = false;
+  bool _destinationRecheckRequested = false;
+  String? _pendingWithdrawalEventId;
+  final Set<String> _handledWithdrawalIds = <String>{};
 
   @override
   TransportViewState build() {
@@ -67,6 +78,9 @@ class TransportViewModel extends Notifier<TransportViewState> {
 
   void start(TransportSession session) {
     _stopTimers();
+    _handledWithdrawalIds.clear();
+    _destinationRecheckRequested = false;
+    _pendingWithdrawalEventId = null;
     state = TransportViewState(
       session: session,
       patientSummary: session.patientSummary,
@@ -78,6 +92,106 @@ class TransportViewModel extends Notifier<TransportViewState> {
       }
     });
     _startLocationUpdates();
+    _startDestinationMonitoring();
+  }
+
+  void _startDestinationMonitoring() {
+    _destinationStatusTimer?.cancel();
+    final StreamSubscription<RealtimeSignal>? oldSubscription =
+        _realtimeSubscription;
+    _realtimeSubscription = null;
+    if (oldSubscription != null) {
+      unawaited(oldSubscription.cancel());
+    }
+    _realtimeSubscription = ref
+        .read(realtimeSignalSourceProvider)
+        .watchSignals()
+        .listen(_onRealtimeSignal, onError: (_, _) {});
+    _destinationStatusTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_checkDestinationStatus()),
+    );
+    unawaited(_checkDestinationStatus());
+  }
+
+  void _onRealtimeSignal(RealtimeSignal signal) {
+    if (signal.type == 'HOSPITAL_ACCEPTANCE_WITHDRAWN' &&
+        signal.aggregateId == state.session?.destination.offerId) {
+      unawaited(_checkDestinationStatus(eventId: signal.eventId));
+    }
+  }
+
+  Future<void> _checkDestinationStatus({String? eventId}) async {
+    final TransportSession? session = state.session;
+    if (session == null ||
+        session.requestStatus != 'EN_ROUTE' ||
+        state.urgentWithdrawal != null) {
+      return;
+    }
+    if (_isCheckingDestination) {
+      _destinationRecheckRequested = true;
+      _pendingWithdrawalEventId ??= eventId;
+      return;
+    }
+    _isCheckingDestination = true;
+    try {
+      final PatientTransportSummary summary =
+          state.patientSummary ?? session.patientSummary;
+      final HospitalSearchSession recoverySession = HospitalSearchSession(
+        requestId: session.requestId,
+        startedAt: session.requestStartedAt,
+        initialRadiusKm: 10,
+        radiusStepKm: 10,
+        expansionIntervalSeconds: 60,
+        maximumRadiusKm: 100,
+        patientSummary: summary,
+        isDestinationRecovery: true,
+      );
+      final HospitalSearchProgress progress = await ref
+          .read(hospitalSearchRepositoryProvider)
+          .getProgress(recoverySession);
+      final matchingWithdrawals = progress.withdrawnHospitals.where(
+        (item) => item.offerId == session.destination.offerId,
+      );
+      final withdrawn = matchingWithdrawals.isEmpty
+          ? null
+          : matchingWithdrawals.first;
+      if (progress.currentDestinationOfferId != null ||
+          (!progress.isWithdrawalRecovery && withdrawn == null)) {
+        return;
+      }
+      final String noticeId =
+          eventId ??
+          '${session.destination.offerId}:${withdrawn?.withdrawnAt?.microsecondsSinceEpoch ?? 'withdrawn'}';
+      if (!_handledWithdrawalIds.add(noticeId)) {
+        return;
+      }
+      pauseLocationUpdates();
+      _destinationStatusTimer?.cancel();
+      _destinationStatusTimer = null;
+      state = state.copyWith(
+        urgentWithdrawal: UrgentDestinationWithdrawal(
+          id: noticeId,
+          hospitalName: session.destination.name,
+          reason: withdrawn?.reasonLabel ?? '병원 사정으로 수용이 어렵습니다.',
+          recoverySession: recoverySession,
+        ),
+      );
+    } catch (_) {
+      // SSE는 변경 신호일 뿐이며 다음 주기 또는 앱 복귀 시 다시 권위 조회합니다.
+    } finally {
+      _isCheckingDestination = false;
+      if (_destinationRecheckRequested && state.urgentWithdrawal == null) {
+        _destinationRecheckRequested = false;
+        final String? pendingEventId = _pendingWithdrawalEventId;
+        _pendingWithdrawalEventId = null;
+        unawaited(_checkDestinationStatus(eventId: pendingEventId));
+      }
+    }
+  }
+
+  void acknowledgeUrgentWithdrawal() {
+    state = state.copyWith(clearUrgentWithdrawal: true);
   }
 
   void _startLocationUpdates() {
@@ -135,7 +249,14 @@ class TransportViewModel extends Notifier<TransportViewState> {
     _locationTimer = null;
   }
 
-  void resumeLocationUpdates() => _startLocationUpdates();
+  void resumeLocationUpdates() {
+    _startLocationUpdates();
+    if (_realtimeSubscription == null || _destinationStatusTimer == null) {
+      _startDestinationMonitoring();
+    } else {
+      unawaited(_checkDestinationStatus());
+    }
+  }
 
   Future<bool> addVitalUpdate(InTransitVitalUpdate update) async {
     final TransportSession? session = state.session;
@@ -309,6 +430,14 @@ class TransportViewModel extends Notifier<TransportViewState> {
     _timer = null;
     _locationTimer?.cancel();
     _locationTimer = null;
+    _destinationStatusTimer?.cancel();
+    _destinationStatusTimer = null;
+    final StreamSubscription<RealtimeSignal>? subscription =
+        _realtimeSubscription;
+    _realtimeSubscription = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
   }
 
   int _elapsedSeconds(TransportSession session) {
@@ -335,6 +464,7 @@ class TransportViewState {
     this.latestTreatmentAt,
     this.errorMessage,
     this.locationErrorMessage,
+    this.urgentWithdrawal,
   });
 
   final TransportSession? session;
@@ -350,6 +480,7 @@ class TransportViewState {
   final DateTime? latestTreatmentAt;
   final String? errorMessage;
   final String? locationErrorMessage;
+  final UrgentDestinationWithdrawal? urgentWithdrawal;
 
   bool get isSavingClinicalUpdate =>
       isSavingVitals ||
@@ -370,8 +501,10 @@ class TransportViewState {
     DateTime? latestTreatmentAt,
     String? errorMessage,
     String? locationErrorMessage,
+    UrgentDestinationWithdrawal? urgentWithdrawal,
     bool clearError = false,
     bool clearLocationError = false,
+    bool clearUrgentWithdrawal = false,
   }) {
     return TransportViewState(
       session: session,
@@ -390,6 +523,9 @@ class TransportViewState {
       locationErrorMessage: clearLocationError
           ? null
           : locationErrorMessage ?? this.locationErrorMessage,
+      urgentWithdrawal: clearUrgentWithdrawal
+          ? null
+          : urgentWithdrawal ?? this.urgentWithdrawal,
     );
   }
 }

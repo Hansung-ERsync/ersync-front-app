@@ -7,10 +7,22 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../transport/domain/entities/transport_session.dart';
 import '../../../patient_assessment/presentation/providers/patient_assessment_view_model.dart';
 import '../../domain/entities/accepted_hospital.dart';
+import '../../domain/entities/hospital_response.dart';
 import '../../domain/entities/hospital_search_progress.dart';
 import '../../domain/entities/hospital_search_session.dart';
 import '../providers/hospital_search_view_model.dart';
 import '../widgets/transport_cancellation_sheet.dart';
+
+const int initialHospitalSearchAnimationSeconds = 10;
+
+bool shouldShowHospitalResponseDashboard({
+  required HospitalSearchSession session,
+  required HospitalSearchProgress progress,
+}) {
+  return session.isDestinationRecovery ||
+      progress.hasResponseDashboard ||
+      progress.elapsedSeconds >= initialHospitalSearchAnimationSeconds;
+}
 
 class HospitalSearchPage extends ConsumerStatefulWidget {
   const HospitalSearchPage({super.key, required this.session});
@@ -99,13 +111,17 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
       );
     }
 
-    if (progress.acceptedHospitals.isNotEmpty) {
-      return _buildAcceptedHospitalsScreen(state, progress);
+    if (shouldShowHospitalResponseDashboard(
+      session: widget.session,
+      progress: progress,
+    )) {
+      return _buildHospitalResponsesScreen(state, progress);
     }
 
-    if (progress.isExhausted) {
-      return _buildExhaustedScreen(state, progress);
-    }
+    final int declinedCount =
+        progress.rejectedHospitals.length + progress.withdrawnHospitals.length;
+    final int visibleResponseCount =
+        progress.pendingHospitals.length + declinedCount;
 
     return PopScope(
       canPop: false,
@@ -151,10 +167,7 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
                             ),
                             const SizedBox(height: 14),
                             Text(
-                              progress.candidateShortage
-                                  ? '현재 범위의 병원 수가 부족해 다음 범위로 확대하고 있습니다.'
-                                  : '${_formatMinutes(widget.session.expansionIntervalSeconds)} 미응답 시 '
-                                        '${widget.session.radiusStepKm}km씩 자동 확대됩니다.',
+                              _searchGuidance(progress),
                               textAlign: TextAlign.center,
                               style: const TextStyle(
                                 color: AppColors.textTertiary,
@@ -162,6 +175,30 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
                                 height: 1.45,
                               ),
                             ),
+                            if (visibleResponseCount > 0) ...<Widget>[
+                              const SizedBox(height: 18),
+                              Container(
+                                key: const Key(
+                                  'hospitalSearchLiveResponseSummary',
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceMuted,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  '응답 대기 ${progress.pendingHospitals.length} · '
+                                  '거절 $declinedCount',
+                                  style: const TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ],
                             if (state.errorMessage != null) ...<Widget>[
                               const SizedBox(height: 14),
                               Text(
@@ -219,202 +256,133 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
     );
   }
 
-  Widget _buildExhaustedScreen(
+  Widget _buildHospitalResponsesScreen(
     HospitalSearchViewState state,
     HospitalSearchProgress progress,
   ) {
+    final List<HospitalResponse> declinedHospitals = <HospitalResponse>[
+      ...progress.withdrawnHospitals,
+      ...progress.rejectedHospitals,
+    ];
     return PopScope(
       canPop: false,
-      child: Scaffold(
-        backgroundColor: AppColors.surface,
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
+      child: DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          backgroundColor: AppColors.background,
+          body: SafeArea(
             child: Column(
               children: <Widget>[
+                _AcceptedStatusBar(
+                  elapsedLabel: _formatElapsed(progress.elapsedSeconds),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        '병원 응답 현황',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 16),
+                      _HospitalResponseTabs(
+                        acceptedCount: progress.acceptedHospitals.length,
+                        pendingCount: progress.pendingHospitals.length,
+                        declinedCount: declinedHospitals.length,
+                      ),
+                    ],
+                  ),
+                ),
                 Expanded(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 420),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          SizedBox(
-                            width: double.infinity,
-                            child: Text(
-                              '응답 가능한 병원을 찾지 못했습니다',
-                              key: const Key('hospitalSearchExhaustedTitle'),
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            _exhaustionMessage(progress.exhaustionReason),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: AppColors.textSecondary,
-                              height: 1.5,
-                            ),
-                          ),
-                          if (state.errorMessage != null) ...<Widget>[
-                            const SizedBox(height: 14),
-                            Text(
-                              state.errorMessage!,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: AppColors.statusNegative,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ],
+                  child: TabBarView(
+                    children: <Widget>[
+                      _HospitalResponseList(
+                        listKey: const Key('acceptedHospitalList'),
+                        emptyTitle: '아직 수락한 병원이 없습니다',
+                        emptyDescription: '수락한 병원이 이 화면에 바로 표시됩니다.',
+                        children: progress.acceptedHospitals
+                            .map(
+                              (AcceptedHospital hospital) =>
+                                  _AcceptedHospitalCard(
+                                    hospital: hospital,
+                                    isSelecting: state.isSelectingDestination,
+                                    onCall: () => _callHospital(hospital),
+                                    onDirections: () =>
+                                        _openDirections(hospital),
+                                    onSelect: () =>
+                                        _selectDestination(hospital),
+                                  ),
+                            )
+                            .toList(),
+                      ),
+                      _HospitalResponseList(
+                        listKey: const Key('pendingHospitalList'),
+                        emptyTitle: '응답을 기다리는 병원이 없습니다',
+                        emptyDescription: '응답 대기 중인 병원이 이 화면에 바로 표시됩니다.',
+                        children: progress.pendingHospitals
+                            .map(
+                              (HospitalResponse hospital) =>
+                                  _HospitalResponseCard(hospital: hospital),
+                            )
+                            .toList(),
+                      ),
+                      _HospitalResponseList(
+                        listKey: const Key('declinedHospitalList'),
+                        emptyTitle: '거절하거나 철회한 병원이 없습니다',
+                        emptyDescription: '거절하거나 철회한 병원이 이 화면에 바로 표시됩니다.',
+                        children: declinedHospitals
+                            .map(
+                              (HospitalResponse hospital) =>
+                                  _HospitalResponseCard(hospital: hospital),
+                            )
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                if (state.errorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: Text(
+                      state.errorMessage!,
+                      style: const TextStyle(
+                        color: AppColors.statusNegative,
+                        fontSize: 13,
                       ),
                     ),
                   ),
-                ),
-                SizedBox(
+                Container(
+                  key: const Key('acceptedHospitalBottomAction'),
                   width: double.infinity,
-                  height: 58,
-                  child: FilledButton.icon(
-                    key: const Key('retryHospitalSearchButton'),
-                    onPressed: state.isRetrying ? null : _viewModel.retrySearch,
-                    icon: state.isRetrying
-                        ? const SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.4,
-                              color: AppColors.textOnDark,
-                            ),
-                          )
-                        : const Icon(Icons.refresh_rounded),
-                    label: const Text(
-                      '현재 위치에서 다시 검색',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                  decoration: const BoxDecoration(
+                    color: AppColors.surface,
+                    border: Border(top: BorderSide(color: AppColors.border)),
                   ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: OutlinedButton(
-                    key: const Key('cancelExhaustedTransportButton'),
-                    onPressed: state.isRetrying ? null : _openCancellationSheet,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.statusNegative,
-                    ),
-                    child: const Text(
-                      '요청 취소',
-                      style: TextStyle(fontWeight: FontWeight.w800),
+                  child: SizedBox(
+                    height: 56,
+                    child: FilledButton(
+                      key: const Key('cancelAcceptedTransportButton'),
+                      onPressed: state.isSelectingDestination
+                          ? null
+                          : _openCancellationSheet,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.statusNegative,
+                        foregroundColor: AppColors.textOnDark,
+                        disabledBackgroundColor: AppColors.negativeBorder,
+                        disabledForegroundColor: AppColors.textOnDark,
+                      ),
+                      child: const Text(
+                        '요청 취소',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _exhaustionMessage(String? reason) {
-    return switch (reason) {
-      'NO_CANDIDATES' => '현재 위치와 조건으로 연락 가능한 병원이 없습니다. 위치를 다시 확인한 뒤 재검색해주세요.',
-      'ALL_REJECTED' => '검색 범위의 병원이 모두 수용을 거절했습니다. 현재 위치에서 새 검색을 시작할 수 있습니다.',
-      'NO_RESPONSE_INCLUDED' =>
-        '검색 범위의 병원에 모두 요청했지만 수락 응답이 없습니다. 현재 위치에서 새 검색을 시작할 수 있습니다.',
-      _ => '최대 검색 범위까지 병원 응답이 없었습니다. 현재 위치에서 다시 검색할 수 있습니다.',
-    };
-  }
-
-  Widget _buildAcceptedHospitalsScreen(
-    HospitalSearchViewState state,
-    HospitalSearchProgress progress,
-  ) {
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        body: SafeArea(
-          child: Column(
-            children: <Widget>[
-              _AcceptedStatusBar(
-                elapsedLabel: _formatElapsed(progress.elapsedSeconds),
-              ),
-              Expanded(
-                child: ListView(
-                  key: const Key('acceptedHospitalList'),
-                  padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
-                  children: <Widget>[
-                    Text(
-                      '수락 병원 선택',
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      '병원이 수용 가능 상태로 응답했습니다. 실제 이송할 목적지를 선택해주세요.',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        height: 1.45,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    ...progress.acceptedHospitals.map(
-                      (AcceptedHospital hospital) => Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: _AcceptedHospitalCard(
-                          hospital: hospital,
-                          isSelecting: state.isSelectingDestination,
-                          onCall: () => _callHospital(hospital),
-                          onSelect: () => _selectDestination(hospital),
-                        ),
-                      ),
-                    ),
-                    if (state.errorMessage != null) ...<Widget>[
-                      const SizedBox(height: 4),
-                      Text(
-                        state.errorMessage!,
-                        style: const TextStyle(
-                          color: AppColors.statusNegative,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Container(
-                key: const Key('acceptedHospitalBottomAction'),
-                width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-                decoration: const BoxDecoration(
-                  color: AppColors.surface,
-                  border: Border(top: BorderSide(color: AppColors.border)),
-                ),
-                child: SizedBox(
-                  height: 56,
-                  child: FilledButton(
-                    key: const Key('cancelAcceptedTransportButton'),
-                    onPressed: state.isSelectingDestination
-                        ? null
-                        : _openCancellationSheet,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.statusNegative,
-                      foregroundColor: AppColors.textOnDark,
-                      disabledBackgroundColor: AppColors.negativeBorder,
-                      disabledForegroundColor: AppColors.textOnDark,
-                    ),
-                    child: const Text(
-                      '요청 취소',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ),
@@ -472,6 +440,33 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
     }
   }
 
+  Future<void> _openDirections(AcceptedHospital hospital) async {
+    final double? latitude = hospital.latitude;
+    final double? longitude = hospital.longitude;
+    if (latitude == null || longitude == null) {
+      return;
+    }
+    final Uri directionsUri = Uri.https(
+      'www.google.com',
+      '/maps/dir/',
+      <String, String>{'api': '1', 'destination': '$latitude,$longitude'},
+    );
+    bool opened = false;
+    try {
+      opened = await launchUrl(
+        directionsUri,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      opened = false;
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('지도 앱을 열 수 없습니다.')));
+    }
+  }
+
   Future<void> _openCancellationSheet() async {
     final bool confirmed =
         await showDialog<bool>(
@@ -506,6 +501,7 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
     final clearDraft = ref.read(clearPatientAssessmentDraftProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
+        ref.invalidate(patientAssessmentViewModelProvider);
         await clearDraft.call();
       } finally {
         if (mounted) {
@@ -528,6 +524,18 @@ class _HospitalSearchPageState extends ConsumerState<HospitalSearchPage>
       return '${seconds ~/ 60}분';
     }
     return '$seconds초';
+  }
+
+  String _searchGuidance(HospitalSearchProgress progress) {
+    if (progress.currentRadiusKm >= widget.session.maximumRadiusKm &&
+        progress.nextExpansionAt == null) {
+      return '최대 탐색 범위에서 병원 응답을 계속 기다리고 있습니다.';
+    }
+    if (progress.candidateShortage) {
+      return '현재 범위의 병원 수가 부족해 다음 범위로 확대하고 있습니다.';
+    }
+    return '${_formatMinutes(widget.session.expansionIntervalSeconds)} 미응답 시 '
+        '${widget.session.radiusStepKm}km씩 자동 확대됩니다.';
   }
 }
 
@@ -641,6 +649,201 @@ class _RadarRing extends StatelessWidget {
   }
 }
 
+class _HospitalResponseTabs extends StatelessWidget {
+  const _HospitalResponseTabs({
+    required this.acceptedCount,
+    required this.pendingCount,
+    required this.declinedCount,
+  });
+
+  final int acceptedCount;
+  final int pendingCount;
+  final int declinedCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: TabBar(
+        key: const Key('hospitalResponseTabs'),
+        dividerColor: Colors.transparent,
+        labelColor: AppColors.textPrimary,
+        unselectedLabelColor: AppColors.textSecondary,
+        labelStyle: const TextStyle(fontWeight: FontWeight.w800),
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: BoxDecoration(
+          color: AppColors.surface,
+          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(color: Color(0x0D101828), blurRadius: 6),
+          ],
+        ),
+        tabs: <Widget>[
+          Tab(text: '수락 $acceptedCount'),
+          Tab(text: '응답 대기 $pendingCount'),
+          Tab(text: '거절 $declinedCount'),
+        ],
+      ),
+    );
+  }
+}
+
+class _HospitalResponseList extends StatelessWidget {
+  const _HospitalResponseList({
+    required this.listKey,
+    required this.emptyTitle,
+    required this.emptyDescription,
+    required this.children,
+  });
+
+  final Key listKey;
+  final String emptyTitle;
+  final String emptyDescription;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                emptyTitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                emptyDescription,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      key: listKey,
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+      itemCount: children.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 14),
+      itemBuilder: (_, int index) => children[index],
+    );
+  }
+}
+
+class _HospitalResponseCard extends StatelessWidget {
+  const _HospitalResponseCard({required this.hospital});
+
+  final HospitalResponse hospital;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isPending = hospital.isPending;
+    final Color statusColor = isPending
+        ? AppColors.statusChecking
+        : AppColors.statusNegative;
+    final Color backgroundColor = isPending
+        ? AppColors.checkingBackground
+        : AppColors.negativeBackground;
+    return Container(
+      key: Key('hospitalResponseCard_${hospital.offerId}'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  hospital.name,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  hospital.statusLabel,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              if (hospital.distanceMeters != null)
+                _HospitalInfoChip(
+                  icon: Icons.near_me_outlined,
+                  label: hospital.distanceMeters! >= 1000
+                      ? '${(hospital.distanceMeters! / 1000).toStringAsFixed(1)}km'
+                      : '${hospital.distanceMeters}m',
+                ),
+              if (hospital.etaMinutes != null)
+                _HospitalInfoChip(
+                  icon: Icons.route_outlined,
+                  label: '약 ${hospital.etaMinutes}분',
+                ),
+              _HospitalInfoChip(
+                icon: Icons.schedule_rounded,
+                label: _formatHospitalResponseTime(hospital.statusUpdatedAt),
+              ),
+            ],
+          ),
+          if (!isPending) ...<Widget>[
+            const SizedBox(height: 14),
+            Text(
+              '사유: ${hospital.reasonLabel ?? '병원 사정으로 수용이 어렵습니다.'}',
+              style: const TextStyle(
+                color: AppColors.statusNegative,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+String _formatHospitalResponseTime(DateTime value) {
+  final String hour = value.hour.toString().padLeft(2, '0');
+  final String minute = value.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
 class _AcceptedStatusBar extends StatelessWidget {
   const _AcceptedStatusBar({required this.elapsedLabel});
 
@@ -690,12 +893,14 @@ class _AcceptedHospitalCard extends StatelessWidget {
     required this.hospital,
     required this.isSelecting,
     required this.onCall,
+    required this.onDirections,
     required this.onSelect,
   });
 
   final AcceptedHospital hospital;
   final bool isSelecting;
   final VoidCallback onCall;
+  final VoidCallback onDirections;
   final VoidCallback onSelect;
 
   @override
@@ -746,7 +951,7 @@ class _AcceptedHospitalCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      hospital.address,
+                      hospital.fullAddress,
                       style: const TextStyle(
                         color: AppColors.textSecondary,
                         height: 1.35,
@@ -808,26 +1013,40 @@ class _AcceptedHospitalCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: SizedBox(
-                  height: 56,
-                  child: FilledButton(
-                    key: Key('selectDestination_${hospital.offerId}'),
-                    onPressed: isSelecting ? null : onSelect,
-                    child: isSelecting
-                        ? const SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.4,
-                              color: AppColors.textOnDark,
-                            ),
-                          )
-                        : const Text('병원으로 이송', maxLines: 1),
+              if (hospital.latitude != null &&
+                  hospital.longitude != null) ...<Widget>[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SizedBox(
+                    height: 56,
+                    child: OutlinedButton.icon(
+                      key: Key('directionsHospital_${hospital.offerId}'),
+                      onPressed: isSelecting ? null : onDirections,
+                      icon: const Icon(Icons.directions_rounded),
+                      label: const Text('길찾기', maxLines: 1),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 56,
+            child: FilledButton(
+              key: Key('selectDestination_${hospital.offerId}'),
+              onPressed: isSelecting ? null : onSelect,
+              child: isSelecting
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: AppColors.textOnDark,
+                      ),
+                    )
+                  : const Text('병원으로 이송', maxLines: 1),
+            ),
           ),
         ],
       ),

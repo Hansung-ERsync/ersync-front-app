@@ -27,6 +27,7 @@ class ApiPatientAssessmentRepository implements PatientAssessmentRepository {
   final DeviceLocationService _locationService;
   final PatientAssessmentDraftStore _draftStore;
   final IdempotencyKeyGenerator _idempotencyKeyGenerator;
+  Future<void> _draftMutation = Future<void>.value();
 
   Options _options({String? idempotencyKey}) => Options(
     headers: idempotencyKey == null
@@ -48,6 +49,7 @@ class ApiPatientAssessmentRepository implements PatientAssessmentRepository {
         protocol,
         'preKtasStandardVersion',
       );
+      await _draftMutation;
       final PatientAssessmentDraft? saved = await _draftStore.read();
       if (saved != null &&
           saved.assessmentProtocolVersion == version &&
@@ -55,23 +57,34 @@ class ApiPatientAssessmentRepository implements PatientAssessmentRepository {
         return saved;
       }
       if (saved != null) {
-        await _draftStore.clear();
+        await clearDraft();
       }
       final PatientAssessmentDraft fresh = await _createFreshDraft(
         assessmentProtocolVersion: version,
         preKtasStandardVersion: preKtasVersion,
       );
-      await _draftStore.write(fresh);
       return fresh;
     });
   }
 
   @override
-  Future<void> saveDraft(PatientAssessmentDraft draft) =>
-      _draftStore.write(draft);
+  Future<void> saveDraft(PatientAssessmentDraft draft) {
+    return _enqueueDraftMutation(() => _draftStore.write(draft));
+  }
 
   @override
-  Future<void> clearDraft() => _draftStore.clear();
+  Future<void> clearDraft() {
+    return _enqueueDraftMutation(_draftStore.clear);
+  }
+
+  Future<void> _enqueueDraftMutation(Future<void> Function() mutation) {
+    final Future<void> operation = _draftMutation.then((_) => mutation());
+    _draftMutation = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
 
   @override
   Future<TransferRequestReceipt> submit(PatientAssessmentDraft draft) {
@@ -99,14 +112,16 @@ class ApiPatientAssessmentRepository implements PatientAssessmentRepository {
     required String assessmentProtocolVersion,
     required String preKtasStandardVersion,
   }) async {
-    final DeviceLocationPoint location = await _locationService
-        .getCurrentLocation();
+    final DeviceLocationPoint? lastKnownLocation = await _locationService
+        .getLastKnownLocation();
+    final DeviceLocationPoint location =
+        lastKnownLocation ?? await _locationService.getCurrentLocation();
     final DateTime now = DateTime.now();
     return PatientAssessmentDraft(
       assessmentProtocolVersion: assessmentProtocolVersion,
       preKtasStandardVersion: preKtasStandardVersion,
       clientRequestKey: _idempotencyKeyGenerator.create('transport'),
-      sceneAddress: '현재 GPS 위치',
+      sceneAddress: lastKnownLocation == null ? '현재 GPS 위치' : '최근 GPS 위치',
       latitude: location.latitude,
       longitude: location.longitude,
       locationSource: 'GPS',
@@ -232,7 +247,42 @@ class ApiPatientAssessmentRepository implements PatientAssessmentRepository {
       'treatments': draft.treatments
           .map((TreatmentType type) => _treatment(type, draft, enteredAt))
           .toList(),
+      if (_hasSupplementalAssessment(draft))
+        'supplementalAssessment': _supplementalAssessment(draft),
     };
+  }
+
+  bool _hasSupplementalAssessment(PatientAssessmentDraft draft) {
+    return draft.glucoseMgDl != null ||
+        draft.leftPupil != null ||
+        draft.rightPupil != null ||
+        draft.medicalHistory.trim().isNotEmpty ||
+        draft.allergies.trim().isNotEmpty ||
+        draft.medications.trim().isNotEmpty ||
+        draft.isolationConcern != null;
+  }
+
+  Map<String, Object?> _supplementalAssessment(PatientAssessmentDraft draft) {
+    final DateTime assessedAt = draft.performedAt;
+    final DateTime enteredAt = draft.enteredAt.isBefore(assessedAt)
+        ? assessedAt
+        : draft.enteredAt;
+    return <String, Object?>{
+      'assessedAt': assessedAt.toUtc().toIso8601String(),
+      'enteredAt': enteredAt.toUtc().toIso8601String(),
+      'glucoseMgDl': draft.glucoseMgDl,
+      'leftPupil': draft.leftPupil?.name.toUpperCase(),
+      'rightPupil': draft.rightPupil?.name.toUpperCase(),
+      'medicalHistory': _trimToNull(draft.medicalHistory),
+      'allergies': _trimToNull(draft.allergies),
+      'medications': _trimToNull(draft.medications),
+      'isolationConcern': draft.isolationConcern,
+    };
+  }
+
+  String? _trimToNull(String value) {
+    final String trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 
   Map<String, Object?> _vitalMeasurement(

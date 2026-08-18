@@ -8,8 +8,6 @@ class MockHospitalSearchDataSource {
   Future<HospitalSearchProgress> getProgress(
     HospitalSearchSession session,
   ) async {
-    await Future<void>.delayed(const Duration(milliseconds: 60));
-
     final int elapsedSeconds = DateTime.now()
         .difference(session.startedAt)
         .inSeconds
@@ -53,10 +51,6 @@ class MockHospitalSearchDataSource {
   }
 
   Future<void> selectDestination(String requestId, String offerId) async {
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-  }
-
-  Future<void> retrySearch(String requestId) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
   }
 

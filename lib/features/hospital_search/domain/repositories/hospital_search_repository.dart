@@ -10,8 +10,6 @@ abstract interface class HospitalSearchRepository {
     String idempotencyKey,
   );
 
-  Future<void> retrySearch(String requestId, String idempotencyKey);
-
   Future<void> cancelRequest(
     String requestId,
     TransportCancellation cancellation,

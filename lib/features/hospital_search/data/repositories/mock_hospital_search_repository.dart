@@ -23,11 +23,6 @@ class MockHospitalSearchRepository implements HospitalSearchRepository {
   }
 
   @override
-  Future<void> retrySearch(String requestId, String idempotencyKey) {
-    return _dataSource.retrySearch(requestId);
-  }
-
-  @override
   Future<void> cancelRequest(
     String requestId,
     TransportCancellation cancellation,

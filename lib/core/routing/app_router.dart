@@ -10,6 +10,7 @@ import '../../features/hospital_search/domain/entities/hospital_search_session.d
 import '../../features/hospital_search/presentation/pages/hospital_search_page.dart';
 import '../../features/patient_assessment/presentation/pages/patient_assessment_page.dart';
 import '../../features/settings/presentation/pages/app_guide_page.dart';
+import '../../features/settings/presentation/pages/handoff_history_page.dart';
 import '../../features/settings/presentation/pages/settings_page.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
 import '../../features/transport/domain/entities/transport_session.dart';
@@ -96,6 +97,11 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
         path: '/app-guide',
         name: 'appGuide',
         builder: (context, state) => const AppGuidePage(),
+      ),
+      GoRoute(
+        path: '/handoff-history',
+        name: 'handoffHistory',
+        builder: (context, state) => const HandoffHistoryPage(),
       ),
     ],
   );

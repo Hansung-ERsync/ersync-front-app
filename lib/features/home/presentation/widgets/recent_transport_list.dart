@@ -4,47 +4,36 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../transport/domain/entities/recent_transport.dart';
 import 'handoff_status_badge.dart';
 
-class RecentTransportList extends StatefulWidget {
-  const RecentTransportList({super.key, required this.transports});
+class RecentTransportList extends StatelessWidget {
+  const RecentTransportList({
+    super.key,
+    required this.transports,
+    this.maximumItems = 3,
+    this.title = '최근 이송',
+  });
 
   final List<RecentTransport> transports;
-
-  @override
-  State<RecentTransportList> createState() => _RecentTransportListState();
-}
-
-class _RecentTransportListState extends State<RecentTransportList> {
-  static const int _collapsedItemCount = 3;
-
-  bool _isExpanded = false;
-
-  @override
-  void didUpdateWidget(covariant RecentTransportList oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.transports.length <= _collapsedItemCount && _isExpanded) {
-      _isExpanded = false;
-    }
-  }
+  final int? maximumItems;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
-    final List<RecentTransport> visibleTransports = _isExpanded
-        ? widget.transports
-        : widget.transports.take(_collapsedItemCount).toList(growable: false);
-    final bool canExpand = widget.transports.length > _collapsedItemCount;
+    final List<RecentTransport> visibleTransports = maximumItems == null
+        ? transports
+        : transports.take(maximumItems!).toList(growable: false);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          '최근 이송',
+          title,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
             color: AppColors.textTertiary,
             fontWeight: FontWeight.w500,
           ),
         ),
         const SizedBox(height: 12),
-        if (widget.transports.isEmpty)
+        if (transports.isEmpty)
           const _EmptyRecentTransportCard()
         else
           DecoratedBox(
@@ -86,33 +75,11 @@ class _RecentTransportListState extends State<RecentTransportList> {
                           ],
                         ),
                       ),
-                      if (index != visibleTransports.length - 1 || canExpand)
+                      if (index != visibleTransports.length - 1)
                         const Divider(),
                     ],
                   );
                 }),
-                if (canExpand)
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton.icon(
-                      key: const Key('recentTransportsMoreButton'),
-                      onPressed: () => setState(() {
-                        _isExpanded = !_isExpanded;
-                      }),
-                      iconAlignment: IconAlignment.end,
-                      icon: Icon(
-                        _isExpanded
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
-                      ),
-                      label: Text(
-                        _isExpanded
-                            ? '접기'
-                            : '더보기 (${widget.transports.length - _collapsedItemCount})',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -12,6 +13,7 @@ import '../../../patient_assessment/presentation/providers/patient_assessment_vi
 import '../../domain/entities/in_transit_vital_update.dart';
 import '../../domain/entities/patient_transport_summary.dart';
 import '../../domain/entities/transport_session.dart';
+import '../../domain/entities/urgent_destination_withdrawal.dart';
 import '../providers/transport_view_model.dart';
 import '../../../hospital_search/presentation/widgets/transport_cancellation_sheet.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
@@ -32,6 +34,7 @@ class _TransportInProgressPageState
     extends ConsumerState<TransportInProgressPage>
     with WidgetsBindingObserver {
   late final TransportViewModel _viewModel;
+  bool _isShowingUrgentWithdrawal = false;
 
   @override
   void initState() {
@@ -59,6 +62,19 @@ class _TransportInProgressPageState
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<UrgentDestinationWithdrawal?>(
+      transportViewModelProvider.select(
+        (TransportViewState value) => value.urgentWithdrawal,
+      ),
+      (
+        UrgentDestinationWithdrawal? previous,
+        UrgentDestinationWithdrawal? next,
+      ) {
+        if (next != null && next.id != previous?.id) {
+          _presentUrgentWithdrawal(next);
+        }
+      },
+    );
     final TransportViewState state = ref.watch(transportViewModelProvider);
     final PatientTransportSummary summary =
         state.patientSummary ?? widget.session.patientSummary;
@@ -77,6 +93,7 @@ class _TransportInProgressPageState
                     _DestinationHospitalCard(
                       session: widget.session,
                       onCall: _callHospital,
+                      onDirections: _openDirections,
                     ),
                     const SizedBox(height: 18),
                     _PatientSummaryCard(summary: summary),
@@ -169,6 +186,66 @@ class _TransportInProgressPageState
         context,
       ).showSnackBar(const SnackBar(content: Text('전화 앱을 열 수 없습니다.')));
     }
+  }
+
+  Future<void> _openDirections() async {
+    final destination = widget.session.destination;
+    final double? latitude = destination.latitude;
+    final double? longitude = destination.longitude;
+    if (latitude == null || longitude == null) {
+      return;
+    }
+    final Uri directionsUri = Uri.https(
+      'www.google.com',
+      '/maps/dir/',
+      <String, String>{'api': '1', 'destination': '$latitude,$longitude'},
+    );
+    bool opened = false;
+    try {
+      opened = await launchUrl(
+        directionsUri,
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (_) {
+      opened = false;
+    }
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('지도 앱을 열 수 없습니다.')));
+    }
+  }
+
+  Future<void> _presentUrgentWithdrawal(
+    UrgentDestinationWithdrawal notice,
+  ) async {
+    if (_isShowingUrgentWithdrawal || !mounted) {
+      return;
+    }
+    _isShowingUrgentWithdrawal = true;
+    await HapticFeedback.heavyImpact();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    await HapticFeedback.heavyImpact();
+    if (!mounted) {
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: AppColors.scrim,
+      builder: (_) => _UrgentWithdrawalDialog(notice: notice),
+    );
+    if (!mounted) {
+      return;
+    }
+    _viewModel.acknowledgeUrgentWithdrawal();
+    context.goNamed(
+      'hospitalSearch',
+      pathParameters: <String, String>{
+        'requestId': notice.recoverySession.requestId,
+      },
+      extra: notice.recoverySession,
+    );
   }
 
   Future<void> _addVitalUpdate(PatientTransportSummary summary) async {
@@ -341,6 +418,7 @@ class _TransportInProgressPageState
     }
     if (requested) {
       try {
+        ref.invalidate(patientAssessmentViewModelProvider);
         await ref.read(clearPatientAssessmentDraftProvider).call();
       } finally {
         ref.invalidate(patientAssessmentViewModelProvider);
@@ -366,6 +444,7 @@ class _TransportInProgressPageState
       return;
     }
     if (cancelled) {
+      ref.invalidate(patientAssessmentViewModelProvider);
       await ref.read(clearPatientAssessmentDraftProvider).call();
       ref.invalidate(patientAssessmentViewModelProvider);
       if (!mounted) {
@@ -377,6 +456,170 @@ class _TransportInProgressPageState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('이송을 취소하지 못했습니다. 다시 시도해주세요.')));
+  }
+}
+
+class _UrgentWithdrawalDialog extends StatefulWidget {
+  const _UrgentWithdrawalDialog({required this.notice});
+
+  final UrgentDestinationWithdrawal notice;
+
+  @override
+  State<_UrgentWithdrawalDialog> createState() =>
+      _UrgentWithdrawalDialogState();
+}
+
+class _UrgentWithdrawalDialogState extends State<_UrgentWithdrawalDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
+      _pulseController
+        ..stop()
+        ..value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      key: const Key('urgentDestinationWithdrawalDialog'),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      backgroundColor: Colors.transparent,
+      child: AnimatedBuilder(
+        animation: _pulseController,
+        builder: (BuildContext context, Widget? child) {
+          final Color background = Color.lerp(
+            AppColors.negativeBackground,
+            AppColors.negativeBorder,
+            _pulseController.value * 0.55,
+          )!;
+          return Container(
+            constraints: const BoxConstraints(maxWidth: 380),
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 22),
+            decoration: BoxDecoration(
+              color: background,
+              border: Border.all(
+                color: AppColors.statusNegative,
+                width: 2 + _pulseController.value,
+              ),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: AppColors.statusNegative.withValues(
+                    alpha: 0.18 + _pulseController.value * 0.18,
+                  ),
+                  blurRadius: 24,
+                  spreadRadius: 3,
+                ),
+              ],
+            ),
+            child: child,
+          );
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 64,
+              height: 64,
+              decoration: const BoxDecoration(
+                color: AppColors.statusNegative,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.warning_amber_rounded,
+                color: AppColors.textOnDark,
+                size: 38,
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              '긴급 고지',
+              style: TextStyle(
+                color: AppColors.statusNegative,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${widget.notice.hospitalName}에서\n수락을 철회했습니다',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w900,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              key: const Key('urgentWithdrawalReason'),
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surface.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '사유: ${widget.notice.reason}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w800,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '현재 목적지가 해제되었습니다. 확인 후 새로운 목적지를 직접 선택해주세요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              height: 54,
+              child: FilledButton(
+                key: const Key('confirmUrgentWithdrawalButton'),
+                onPressed: () => Navigator.of(context).pop(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.statusNegative,
+                  foregroundColor: AppColors.textOnDark,
+                ),
+                child: const Text(
+                  '확인',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -555,10 +798,15 @@ class _HandoffRequestDialog extends StatelessWidget {
 }
 
 class _DestinationHospitalCard extends StatelessWidget {
-  const _DestinationHospitalCard({required this.session, required this.onCall});
+  const _DestinationHospitalCard({
+    required this.session,
+    required this.onCall,
+    required this.onDirections,
+  });
 
   final TransportSession session;
   final VoidCallback onCall;
+  final VoidCallback onDirections;
 
   @override
   Widget build(BuildContext context) {
@@ -591,7 +839,7 @@ class _DestinationHospitalCard extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            hospital.address,
+            hospital.fullAddress,
             style: const TextStyle(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 14),
@@ -620,6 +868,19 @@ class _DestinationHospitalCard extends StatelessWidget {
               label: Text('응급실 전화 ${hospital.emergencyRoomPhone}'),
             ),
           ),
+          if (hospital.latitude != null &&
+              hospital.longitude != null) ...<Widget>[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const Key('directionsDestinationHospitalButton'),
+                onPressed: onDirections,
+                icon: const Icon(Icons.directions_rounded),
+                label: const Text('목적지 길찾기'),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -743,6 +1004,68 @@ class _PatientSummaryCard extends StatelessWidget {
             label: '산소포화도',
             value: summary.oxygenSaturationDisplay,
           ),
+          if (summary.hasSupplementalAssessment) ...<Widget>[
+            const SizedBox(height: 4),
+            const Divider(),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                const Expanded(
+                  child: Text(
+                    '추가 평가',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                if (summary.supplementalAssessedAt != null)
+                  Text(
+                    formatClinicalTime(summary.supplementalAssessedAt!),
+                    style: const TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            if (summary.glucoseMgDl != null)
+              _SummaryRow(
+                rowKey: 'glucose',
+                label: '혈당',
+                value: '${summary.glucoseMgDl} mg/dL',
+              ),
+            if (summary.leftPupilLabel != null ||
+                summary.rightPupilLabel != null)
+              _SummaryRow(
+                rowKey: 'pupils',
+                label: '동공',
+                value:
+                    '좌 ${summary.leftPupilLabel ?? '-'} · 우 ${summary.rightPupilLabel ?? '-'}',
+              ),
+            if (summary.medicalHistory != null)
+              _SummaryRow(
+                rowKey: 'medicalHistory',
+                label: '과거력',
+                value: summary.medicalHistory!,
+              ),
+            if (summary.allergies != null)
+              _SummaryRow(
+                rowKey: 'allergies',
+                label: '알레르기',
+                value: summary.allergies!,
+              ),
+            if (summary.medications != null)
+              _SummaryRow(
+                rowKey: 'medications',
+                label: '복용약',
+                value: summary.medications!,
+              ),
+            if (summary.isolationConcern != null)
+              _SummaryRow(
+                rowKey: 'isolationConcern',
+                label: '격리 우려',
+                value: summary.isolationConcern! ? '있음' : '없음',
+              ),
+          ],
         ],
       ),
     );

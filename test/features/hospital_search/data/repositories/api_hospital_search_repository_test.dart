@@ -30,7 +30,6 @@ void main() {
             'startedAt': '2026-08-05T06:00:00Z',
             'endedAt': '2026-08-05T06:05:00Z',
           },
-          'exhaustionReason': null,
           'offers': <Object?>[],
           'serverNow': '2026-08-05T07:00:00Z',
         });
@@ -53,32 +52,59 @@ void main() {
     expect(progress.elapsedSeconds, 5 * 60);
   });
 
-  test('후보 소진 상태는 요청 전체 경과 시간을 계속 계산한다', () async {
+  test('수락 철회 복구 탐색은 응답 대기·거절·철회 병원을 구분한다', () async {
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
         return _jsonResponse(<String, Object?>{
-          'transportRequestId': 'REQUEST-EXHAUSTED',
-          'status': 'CANDIDATES_EXHAUSTED',
+          'transportRequestId': 'REQUEST-RECOVERY',
+          'status': 'SEARCHING',
           'currentDestinationOfferId': null,
           'currentAttempt': <String, Object?>{
-            'dispatchAttemptId': 'ATTEMPT-EXHAUSTED',
-            'number': 1,
-            'status': 'CANDIDATES_EXHAUSTED',
-            'currentRadiusKm': 100,
+            'dispatchAttemptId': 'ATTEMPT-RECOVERY',
+            'number': 2,
+            'status': 'SEARCHING',
+            'triggerType': 'ACCEPTANCE_WITHDRAWAL',
+            'currentRadiusKm': 20,
             'candidateShortage': true,
             'nextExpansionAt': null,
             'startedAt': '2026-08-05T06:00:00Z',
-            'endedAt': '2026-08-05T06:00:01Z',
+            'endedAt': null,
           },
-          'exhaustionReason': 'NO_CANDIDATES',
-          'offers': <Object?>[],
+          'offers': <Object?>[
+            <String, Object?>{
+              'offerId': 'OFFER-PENDING',
+              'status': 'PENDING',
+              'hospitalName': '응답대기병원',
+              'straightLineDistanceMeters': 1200,
+              'etaSeconds': 480,
+              'offeredAt': '2026-08-05T06:04:00Z',
+            },
+            <String, Object?>{
+              'offerId': 'OFFER-REJECTED',
+              'status': 'REJECTED',
+              'hospitalName': '거절병원',
+              'rejectionReason': 'ICU_SHORTAGE',
+              'offeredAt': '2026-08-05T06:02:00Z',
+              'respondedAt': '2026-08-05T06:02:30Z',
+            },
+            <String, Object?>{
+              'offerId': 'OFFER-WITHDRAWN',
+              'status': 'ACCEPTANCE_WITHDRAWN',
+              'hospitalName': '철회병원',
+              'withdrawalReason': 'OTHER',
+              'withdrawalDetail': '응급 수술 발생',
+              'offeredAt': '2026-08-05T06:01:00Z',
+              'respondedAt': '2026-08-05T06:01:30Z',
+              'withdrawnAt': '2026-08-05T06:03:00Z',
+            },
+          ],
           'serverNow': '2026-08-05T06:05:00Z',
         });
       });
 
     final progress = await ApiHospitalSearchRepository(dio).getProgress(
       HospitalSearchSession(
-        requestId: 'REQUEST-EXHAUSTED',
+        requestId: 'REQUEST-RECOVERY',
         startedAt: DateTime.utc(2026, 8, 5, 6),
         initialRadiusKm: 10,
         radiusStepKm: 10,
@@ -87,12 +113,15 @@ void main() {
       ),
     );
 
-    expect(progress.requestStatus, 'CANDIDATES_EXHAUSTED');
-    expect(progress.isElapsedRunning, isFalse);
-    expect(progress.isExhausted, isTrue);
+    expect(progress.requestStatus, 'SEARCHING');
+    expect(progress.isElapsedRunning, isTrue);
+    expect(progress.isWithdrawalRecovery, isTrue);
     expect(progress.candidateShortage, isTrue);
-    expect(progress.exhaustionReason, 'NO_CANDIDATES');
     expect(progress.elapsedSeconds, 5 * 60);
+    expect(progress.pendingHospitals.single.name, '응답대기병원');
+    expect(progress.pendingHospitals.single.etaMinutes, 8);
+    expect(progress.rejectedHospitals.single.reasonLabel, '중환자실 부족');
+    expect(progress.withdrawnHospitals.single.reasonLabel, '기타 · 응급 수술 발생');
   });
 
   test('병원 수락 후 목적지 선택 전까지 경과 시간을 계속 실행한다', () async {
@@ -112,13 +141,15 @@ void main() {
             'startedAt': '2026-08-05T06:00:00Z',
             'endedAt': null,
           },
-          'exhaustionReason': null,
           'offers': <Object?>[
             <String, Object?>{
               'offerId': 'OFFER-ACCEPTED',
               'status': 'ACCEPTED',
               'hospitalName': '서울시청 테스트병원',
               'hospitalAddress': '서울특별시 중구 세종대로 110',
+              'hospitalDetailAddress': '응급의료센터 1층',
+              'hospitalLatitude': 37.5663,
+              'hospitalLongitude': 126.9779,
               'hospitalContact': '02-1234-5678',
               'straightLineDistanceMeters': 0,
               'routeDistanceMeters': null,
@@ -145,11 +176,16 @@ void main() {
     expect(progress.isElapsedRunning, isTrue);
     expect(progress.elapsedSeconds, 5 * 60);
     expect(progress.acceptedHospitals.single.address, '서울특별시 중구 세종대로 110');
+    expect(
+      progress.acceptedHospitals.single.fullAddress,
+      contains('응급의료센터 1층'),
+    );
+    expect(progress.acceptedHospitals.single.latitude, 37.5663);
     expect(progress.acceptedHospitals.single.distanceLabel, '100m 미만');
     expect(progress.acceptedHospitals.single.etaLabel, isNull);
   });
 
-  test('목적지 변경 명령과 후보 소진 재검색마다 새 멱등성 키를 사용한다', () async {
+  test('목적지 변경 명령마다 전달받은 멱등성 키를 사용한다', () async {
     final List<RequestOptions> captured = <RequestOptions>[];
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
@@ -175,23 +211,17 @@ void main() {
       'OFFER-A',
       'destination-command-a2',
     );
-    await repository.retrySearch('REQUEST-1', 'search-retry-command-1');
-
     final List<String> keys = captured
         .map(
           (RequestOptions request) =>
               request.headers['Idempotency-Key']! as String,
         )
         .toList();
-    expect(keys.toSet(), hasLength(4));
+    expect(keys.toSet(), hasLength(3));
     expect(keys, everyElement(matches(RegExp(r'^[A-Za-z0-9._:-]{8,100}$'))));
     expect(captured[0].data, <String, Object>{'offerId': 'OFFER-A'});
     expect(captured[1].data, <String, Object>{'offerId': 'OFFER-B'});
     expect(captured[2].data, <String, Object>{'offerId': 'OFFER-A'});
-    expect(
-      captured[3].uri.path,
-      '/api/v1/transport-requests/REQUEST-1/dispatch-attempts',
-    );
   });
 }
 

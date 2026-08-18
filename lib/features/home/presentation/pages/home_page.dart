@@ -193,15 +193,13 @@ class _HomePageState extends ConsumerState<HomePage> {
       return;
     }
     setState(() => _isStartingNewPatient = true);
-    // A cancelled/completed transport clears its draft at that command's
-    // success boundary. Otherwise keep the secure local draft so an app
-    // restart or temporary network failure can resume the same request key.
     try {
+      // 새 환자 등록은 이전 환자의 임시 저장을 이어가는 동작이 아닙니다.
+      // 먼저 notifier를 폐기해 지연 저장 타이머를 멈춘 뒤 보안 저장소를 비웁니다.
+      ref.invalidate(patientAssessmentViewModelProvider);
+      await ref.read(clearPatientAssessmentDraftProvider).call();
       ref.invalidate(patientAssessmentViewModelProvider);
       if (mounted) {
-        // Navigate immediately and let the assessment page show its loading
-        // state while protocol/GPS initialization finishes. Invalidation
-        // prevents the previous patient's last step from flashing.
         await context.pushNamed('patientAssessment');
       }
     } finally {

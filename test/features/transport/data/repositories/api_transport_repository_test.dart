@@ -269,6 +269,18 @@ void main() {
               'sex': 'MALE',
             },
             'incident': <String, Object?>{'primarySymptom': 'CHEST_PAIN'},
+            'supplementalAssessment': <String, Object?>{
+              'assessedAt': '2026-08-06T06:08:00Z',
+              'enteredAt': '2026-08-06T06:08:30Z',
+              'serverReceivedAt': '2026-08-06T06:08:31Z',
+              'glucoseMgDl': 132,
+              'leftPupil': 'NORMAL',
+              'rightPupil': 'SLUGGISH',
+              'medicalHistory': '고혈압',
+              'allergies': '페니실린',
+              'medications': '혈압약',
+              'isolationConcern': false,
+            },
             'latestSnapshot': <String, Object?>{
               'preKtas': <String, Object?>{
                 'classificationStatus': 'COMPLETED',
@@ -319,6 +331,9 @@ void main() {
                 'offerId': 'OFFER-1',
                 'hospitalName': '한양대학교병원',
                 'hospitalAddress': '서울특별시 성동구 왕십리로 222-1',
+                'hospitalDetailAddress': '본관 1층 응급의료센터',
+                'hospitalLatitude': 37.5596,
+                'hospitalLongitude': 127.0442,
                 'hospitalContact': '02-2290-8119',
                 'currentDestination': true,
                 'routeDistanceMeters': 8400,
@@ -342,6 +357,11 @@ void main() {
       recovery?.transportSession?.destination.address,
       '서울특별시 성동구 왕십리로 222-1',
     );
+    expect(
+      recovery?.transportSession?.destination.detailAddress,
+      '본관 1층 응급의료센터',
+    );
+    expect(recovery?.transportSession?.destination.latitude, 37.5596);
     expect(recovery?.transportSession?.patientSummary.ageLabel, '45세 추정');
     expect(
       recovery?.transportSession?.patientSummary.bloodPressureDisplay,
@@ -350,6 +370,14 @@ void main() {
     expect(
       recovery?.transportSession?.patientSummary.respiratoryRateDisplay,
       '측정 불가',
+    );
+    expect(recovery?.transportSession?.patientSummary.glucoseMgDl, 132);
+    expect(recovery?.transportSession?.patientSummary.leftPupilLabel, '정상');
+    expect(recovery?.transportSession?.patientSummary.rightPupilLabel, '둔함');
+    expect(recovery?.transportSession?.patientSummary.medicalHistory, '고혈압');
+    expect(
+      recovery?.transportSession?.patientSummary.isolationConcern,
+      isFalse,
     );
   });
 }

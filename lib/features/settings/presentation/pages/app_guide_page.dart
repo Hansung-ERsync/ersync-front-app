@@ -270,15 +270,16 @@ class _GuideImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 4 / 3,
-      child: Image.asset(
-        step.assetPath,
-        fit: BoxFit.cover,
-        errorBuilder: (BuildContext context, Object error, StackTrace? stack) {
-          return _GuideImagePlaceholder(icon: step.placeholderIcon);
-        },
-      ),
+    return Image.asset(
+      step.assetPath,
+      width: double.infinity,
+      fit: BoxFit.fitWidth,
+      errorBuilder: (BuildContext context, Object error, StackTrace? stack) {
+        return AspectRatio(
+          aspectRatio: 4 / 3,
+          child: _GuideImagePlaceholder(icon: step.placeholderIcon),
+        );
+      },
     );
   }
 }
