@@ -52,3 +52,17 @@ class LoginRequestDto {
 
   Map<String, dynamic> toJson() => _$LoginRequestDtoToJson(this);
 }
+
+@JsonSerializable(createFactory: false)
+class ParamedicProfileUpdateRequestDto {
+  const ParamedicProfileUpdateRequestDto({
+    required this.displayName,
+    required this.callbackContact,
+  });
+
+  final String displayName;
+  final String callbackContact;
+
+  Map<String, dynamic> toJson() =>
+      _$ParamedicProfileUpdateRequestDtoToJson(this);
+}

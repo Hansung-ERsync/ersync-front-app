@@ -1581,6 +1581,99 @@ void main() {
     expect(find.text('1분 빠른 시작'), findsOneWidget);
   });
 
+  testWidgets('설정에서 프로필을 조회·수정하면 홈의 이름과 회신 연락처 상태가 갱신된다', (
+    WidgetTester tester,
+  ) async {
+    await pumpApp(tester);
+    await tester.enterText(
+      find.byKey(const Key('usernameField')),
+      MockAuthDataSource.mockUsername,
+    );
+    await tester.enterText(
+      find.byKey(const Key('passwordField')),
+      MockAuthDataSource.mockPassword,
+    );
+    await tester.tap(find.byKey(const Key('loginButton')));
+    await tester.pumpAndSettle();
+    await dismissInitialGuide(tester);
+
+    await tester.tap(find.byKey(const Key('settingsButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('profileSettingsButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('내 프로필'), findsOneWidget);
+    expect(
+      find.byKey(const Key('profilePrivacyConsentSummary')),
+      findsOneWidget,
+    );
+    expect(find.text('연락처 개인정보 동의 완료'), findsOneWidget);
+    final EditableText initialName = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const Key('profileDisplayNameField')),
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(initialName.controller.text, '김민준');
+    final EditableText initialContact = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const Key('profileCallbackContactField')),
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(
+      initialContact.controller.text,
+      MockAuthDataSource.mockCallbackContact,
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('profileDisplayNameField')),
+      '김',
+    );
+    await tester.enterText(
+      find.byKey(const Key('profileCallbackContactField')),
+      '02 123',
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('saveProfileButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('saveProfileButton')));
+    await tester.pump();
+    expect(find.text('이름은 2~50자로 입력해주세요'), findsOneWidget);
+    expect(find.text('연락처는 8~30자로 입력해주세요'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('profileDisplayNameField')),
+      ' 박새별 ',
+    );
+    await tester.enterText(
+      find.byKey(const Key('profileCallbackContactField')),
+      '+82-10-1111-2222',
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('saveProfileButton')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('saveProfileButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('프로필을 저장했습니다.'), findsOneWidget);
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byKey(const Key('profileDisplayNameField'))),
+    );
+    expect(container.read(authViewModelProvider).user?.displayName, '박새별');
+    expect(
+      container.read(authViewModelProvider).user?.callbackContact,
+      '+82-10-1111-2222',
+    );
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('박새별 대원'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('박새별 대원'), findsOneWidget);
+  });
+
   test('Pre-KTAS 1~5단계 색상을 제공한다', () {
     expect(AppColors.preKtasButtonByLevel.keys, <int>[1, 2, 3, 4, 5]);
     expect(AppColors.preKtasButton(1), const Color(0xFFE7000B));

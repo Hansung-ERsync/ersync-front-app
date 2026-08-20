@@ -182,9 +182,81 @@ class AuthViewModel extends Notifier<AuthState> {
     }
   }
 
+  Future<bool> refreshMyProfile() async {
+    if (state.isProfileLoading || state.isProfileSaving) {
+      return false;
+    }
+    state = state.copyWith(isProfileLoading: true, clearError: true);
+    try {
+      final AuthUser user = await ref
+          .read(authRepositoryProvider)
+          .getMyProfile();
+      state = state.copyWith(
+        isProfileLoading: false,
+        user: user,
+        clearError: true,
+      );
+      return true;
+    } on AppException catch (error) {
+      state = state.copyWith(
+        isProfileLoading: false,
+        errorMessage: error.message,
+        errorCode: error.code,
+        traceId: error.traceId,
+        clearUser: _mustDiscardCurrentUser(error),
+      );
+      return false;
+    }
+  }
+
+  Future<bool> updateMyProfile({
+    required String displayName,
+    required String callbackContact,
+  }) async {
+    if (state.user == null || state.isProfileLoading || state.isProfileSaving) {
+      return false;
+    }
+    state = state.copyWith(isProfileSaving: true, clearError: true);
+    try {
+      final AuthUser user = await ref
+          .read(authRepositoryProvider)
+          .updateMyProfile(
+            displayName: displayName,
+            callbackContact: callbackContact,
+          );
+      state = state.copyWith(
+        isProfileSaving: false,
+        user: user,
+        clearError: true,
+      );
+      return true;
+    } on AppException catch (error) {
+      state = state.copyWith(
+        isProfileSaving: false,
+        errorMessage: error.message,
+        errorCode: error.code,
+        traceId: error.traceId,
+        clearUser: _mustDiscardCurrentUser(error),
+      );
+      return false;
+    }
+  }
+
   Future<void> signOut() async {
     await ref.read(authRepositoryProvider).signOut();
     state = const AuthState();
+  }
+
+  bool _mustDiscardCurrentUser(AppException error) {
+    return error.statusCode == 401 ||
+        const <String>{
+          'AUTH_001',
+          'AUTH_002',
+          'AUTH_003',
+          'AUTH_005',
+          'COMMON_004',
+          'USER_002',
+        }.contains(error.code);
   }
 }
 
@@ -192,6 +264,8 @@ class AuthState {
   const AuthState({
     this.isLoading = false,
     this.isRestoringSession = false,
+    this.isProfileLoading = false,
+    this.isProfileSaving = false,
     this.invitation,
     this.user,
     this.errorMessage,
@@ -202,6 +276,8 @@ class AuthState {
 
   final bool isLoading;
   final bool isRestoringSession;
+  final bool isProfileLoading;
+  final bool isProfileSaving;
   final InvitationInfo? invitation;
   final AuthUser? user;
   final String? errorMessage;
@@ -212,6 +288,8 @@ class AuthState {
   AuthState copyWith({
     bool? isLoading,
     bool? isRestoringSession,
+    bool? isProfileLoading,
+    bool? isProfileSaving,
     InvitationInfo? invitation,
     AuthUser? user,
     String? errorMessage,
@@ -225,6 +303,8 @@ class AuthState {
     return AuthState(
       isLoading: isLoading ?? this.isLoading,
       isRestoringSession: isRestoringSession ?? this.isRestoringSession,
+      isProfileLoading: isProfileLoading ?? this.isProfileLoading,
+      isProfileSaving: isProfileSaving ?? this.isProfileSaving,
       invitation: clearInvitation ? null : invitation ?? this.invitation,
       user: clearUser ? null : user ?? this.user,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,

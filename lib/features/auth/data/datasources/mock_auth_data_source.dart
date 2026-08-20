@@ -1,6 +1,7 @@
 import '../../../../core/error/app_exception.dart';
 import '../../domain/entities/auth_user.dart';
 import '../../domain/entities/invitation_info.dart';
+import '../../domain/paramedic_profile_input_validator.dart';
 import '../../domain/entities/privacy_consent_record.dart';
 
 class MockAuthDataSource {
@@ -38,6 +39,7 @@ class MockAuthDataSource {
 
   final Map<String, _MockInvitationRecord> _invitations;
   final Map<String, _MockAccountRecord> _accounts;
+  String? _signedInUsername;
 
   Future<InvitationInfo> validateInvitationCode(String code) async {
     await _delay();
@@ -111,7 +113,57 @@ class MockAuthDataSource {
       throw const AppException('아이디 또는 비밀번호를 확인해주세요.');
     }
 
+    _signedInUsername = account.username;
     return account.toEntity();
+  }
+
+  Future<AuthUser> getMyProfile() async {
+    await _delay();
+    return _currentAccount().toEntity();
+  }
+
+  Future<AuthUser> updateMyProfile({
+    required String displayName,
+    required String callbackContact,
+  }) async {
+    await _delay();
+    final String normalizedDisplayName = displayName.trim();
+    final String normalizedCallbackContact = callbackContact.trim();
+    final String? displayNameError =
+        ParamedicProfileInputValidator.displayNameError(normalizedDisplayName);
+    final String? callbackContactError =
+        ParamedicProfileInputValidator.callbackContactError(
+          normalizedCallbackContact,
+        );
+    if (displayNameError != null || callbackContactError != null) {
+      throw AppException(
+        displayNameError ?? callbackContactError!,
+        code: 'COMMON_001',
+        statusCode: 400,
+      );
+    }
+
+    final _MockAccountRecord current = _currentAccount();
+    current.displayName = normalizedDisplayName;
+    current.callbackContact = normalizedCallbackContact;
+    return current.toEntity();
+  }
+
+  Future<void> signOut() async {
+    _signedInUsername = null;
+  }
+
+  _MockAccountRecord _currentAccount() {
+    final String username = _signedInUsername ?? mockUsername;
+    final _MockAccountRecord? account = _accounts[username];
+    if (account == null) {
+      throw const AppException(
+        '구급대원 프로필을 찾을 수 없습니다.',
+        code: 'USER_001',
+        statusCode: 404,
+      );
+    }
+    return account;
   }
 
   Future<void> _delay() {
@@ -141,7 +193,7 @@ class _MockInvitationRecord {
 }
 
 class _MockAccountRecord {
-  const _MockAccountRecord({
+  _MockAccountRecord({
     required this.username,
     required this.password,
     required this.displayName,
@@ -153,10 +205,10 @@ class _MockAccountRecord {
 
   final String username;
   final String password;
-  final String displayName;
+  String displayName;
   final String organizationName;
   final UserRole role;
-  final String callbackContact;
+  String callbackContact;
   final PrivacyConsentRecord consentRecord;
 
   AuthUser toEntity() {

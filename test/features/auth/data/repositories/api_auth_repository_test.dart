@@ -131,6 +131,123 @@ void main() {
     expect((await tokenStorage.read())?.refreshToken, 'REFRESH-1');
   });
 
+  test('이름과 회신 연락처를 함께 수정하고 서버의 전체 프로필 응답을 사용한다', () async {
+    final InMemoryTokenStorage tokenStorage = InMemoryTokenStorage();
+    await tokenStorage.write(
+      AuthTokens.fromApiJson(_tokenResponse('ACCESS-1', 'REFRESH-1')),
+    );
+    final _MockHttpClientAdapter adapter = _MockHttpClientAdapter((
+      RequestOptions request,
+    ) async {
+      expect(request.method, 'PUT');
+      expect(request.uri.path, '/api/v1/paramedics/me');
+      expect(request.headers['Authorization'], 'Bearer ACCESS-1');
+      expect(request.contentType, Headers.jsonContentType);
+      expect(request.headers['Idempotency-Key'], isNull);
+      expect(_requestJson(request), <String, Object?>{
+        'displayName': '새 이름',
+        'callbackContact': '+82-10-1234-5678',
+      });
+      return _jsonResponse(
+        _profileResponse(
+          displayName: '서버 정규화 이름',
+          callbackContact: '+82-10-1234-5678',
+        ),
+      );
+    });
+    final ApiAuthRepository repository = _repository(
+      adapter,
+      tokenStorage,
+      baseUri,
+    );
+
+    final user = await repository.updateMyProfile(
+      displayName: ' 새 이름 ',
+      callbackContact: ' +82-10-1234-5678 ',
+    );
+
+    expect(user.displayName, '서버 정규화 이름');
+    expect(user.callbackContact, '+82-10-1234-5678');
+    expect(user.organizationName, '한성구급대');
+    expect(user.consentRecord.collectionUseVersion, 'COLLECTION_USE_DEV_1.0');
+  });
+
+  test('연락처 동의 오류에서는 인증 정보를 유지하고 프로필 수정 실패를 전달한다', () async {
+    final InMemoryTokenStorage tokenStorage = InMemoryTokenStorage();
+    await tokenStorage.write(
+      AuthTokens.fromApiJson(_tokenResponse('ACCESS-1', 'REFRESH-1')),
+    );
+    final _MockHttpClientAdapter adapter = _MockHttpClientAdapter((
+      RequestOptions request,
+    ) async {
+      return _jsonResponse(<String, Object?>{
+        'code': 'USER_005',
+        'message': '필요한 연락처 동의가 없습니다.',
+        'fieldErrors': <Object?>[],
+        'traceId': 'TRACE-CONSENT',
+      }, statusCode: 409);
+    });
+    final ApiAuthRepository repository = _repository(
+      adapter,
+      tokenStorage,
+      baseUri,
+    );
+
+    await expectLater(
+      repository.updateMyProfile(
+        displayName: '김민준',
+        callbackContact: '010-1234-5678',
+      ),
+      throwsA(
+        isA<AppException>()
+            .having((AppException error) => error.code, 'code', 'USER_005')
+            .having(
+              (AppException error) => error.traceId,
+              'traceId',
+              'TRACE-CONSENT',
+            ),
+      ),
+    );
+    expect((await tokenStorage.read())?.accessToken, 'ACCESS-1');
+  });
+
+  test('프로필 연결 불일치 오류에서는 저장된 인증 정보를 제거한다', () async {
+    final InMemoryTokenStorage tokenStorage = InMemoryTokenStorage();
+    await tokenStorage.write(
+      AuthTokens.fromApiJson(_tokenResponse('ACCESS-1', 'REFRESH-1')),
+    );
+    final _MockHttpClientAdapter adapter = _MockHttpClientAdapter((
+      RequestOptions request,
+    ) async {
+      return _jsonResponse(<String, Object?>{
+        'code': 'COMMON_004',
+        'message': '프로필 연결 정보가 일치하지 않습니다.',
+        'fieldErrors': <Object?>[],
+        'traceId': 'TRACE-LINK',
+      }, statusCode: 403);
+    });
+    final ApiAuthRepository repository = _repository(
+      adapter,
+      tokenStorage,
+      baseUri,
+    );
+
+    await expectLater(
+      repository.updateMyProfile(
+        displayName: '김민준',
+        callbackContact: '010-1234-5678',
+      ),
+      throwsA(
+        isA<AppException>().having(
+          (AppException error) => error.code,
+          'code',
+          'COMMON_004',
+        ),
+      ),
+    );
+    expect(await tokenStorage.read(), isNull);
+  });
+
   test('만료된 Access Token은 한 번 갱신하고 프로필 요청을 재시도한다', () async {
     final InMemoryTokenStorage tokenStorage = InMemoryTokenStorage();
     await tokenStorage.write(
@@ -358,15 +475,18 @@ Map<String, dynamic> _tokenResponse(String accessToken, String refreshToken) {
   };
 }
 
-Map<String, dynamic> _profileResponse() {
+Map<String, dynamic> _profileResponse({
+  String displayName = '김민준',
+  String callbackContact = '010-0000-0000',
+}) {
   return <String, dynamic>{
     'accountId': 'ACCOUNT-1',
     'loginId': 'paramedic01',
-    'displayName': '김민준',
+    'displayName': displayName,
     'organizationId': 'EMS-1',
     'organizationName': '한성구급대',
     'role': 'PARAMEDIC',
-    'callbackContact': '010-0000-0000',
+    'callbackContact': callbackContact,
     'privacyConsent': <String, dynamic>{
       'collectionUsePolicyVersion': 'COLLECTION_USE_DEV_1.0',
       'hospitalProvisionPolicyVersion': 'HOSPITAL_PROVISION_DEV_1.0',
