@@ -18,6 +18,29 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final Uri baseUri = Uri.parse('http://localhost');
 
+  test('기존 저장 토큰의 추가 메타데이터를 무시하고 필수 값만 복원한다', () {
+    final AuthTokens tokens = AuthTokens.fromStorageJson(<String, Object?>{
+      'tokenType': 'Bearer',
+      'accessToken': 'LEGACY-ACCESS',
+      'accessTokenExpiresAt': '2026-08-24T00:00:00Z',
+      'refreshToken': 'LEGACY-REFRESH',
+      'refreshTokenExpiresAt': '2026-09-23T00:00:00Z',
+      'accountId': 'LEGACY-ACCOUNT',
+      'organizationId': 'LEGACY-ORGANIZATION',
+      'role': 'PARAMEDIC',
+    });
+
+    expect(tokens.accessToken, 'LEGACY-ACCESS');
+    expect(tokens.refreshToken, 'LEGACY-REFRESH');
+    expect(tokens.role, 'PARAMEDIC');
+    expect(tokens.toStorageJson(), <String, Object?>{
+      'tokenType': 'Bearer',
+      'accessToken': 'LEGACY-ACCESS',
+      'refreshToken': 'LEGACY-REFRESH',
+      'role': 'PARAMEDIC',
+    });
+  });
+
   test('가입 코드 원문과 서버 동의 버전을 회원가입 요청에 유지한다', () async {
     final InMemoryTokenStorage tokenStorage = InMemoryTokenStorage();
     late Map<String, dynamic> signUpBody;
@@ -29,10 +52,8 @@ void main() {
           'invitationCode': 'Case-Sensitive-Code',
         });
         return _jsonResponse(<String, Object?>{
-          'organizationId': 'EMS-1',
           'organizationName': '한성구급대',
           'role': 'PARAMEDIC',
-          'expiresAt': '2026-08-07T09:00:00Z',
           'requiredConsents': <Object?>[
             <String, Object?>{
               'type': 'CONTACT_COLLECTION_USE',
@@ -47,14 +68,7 @@ void main() {
       }
       if (request.uri.path == '/api/v1/auth/signups/paramedic') {
         signUpBody = _requestJson(request);
-        return _jsonResponse(<String, Object?>{
-          'accountId': 'ACCOUNT-1',
-          'organizationId': 'EMS-1',
-          'organizationName': '한성구급대',
-          'role': 'PARAMEDIC',
-          'hospitalId': null,
-          'receivingStatus': null,
-        }, statusCode: 201);
+        return ResponseBody.fromString('', 201);
       }
       fail('예상하지 못한 요청입니다: ${request.method} ${request.uri}');
     });
@@ -78,7 +92,6 @@ void main() {
     );
 
     expect(invitation.code, 'Case-Sensitive-Code');
-    expect(invitation.organizationId, 'EMS-1');
     expect(
       invitation.consentVersion(PrivacyConsentType.contactCollectionUse),
       'COLLECTION_USE_DEV_1.0',
@@ -127,7 +140,6 @@ void main() {
 
     expect(user.accountId, 'ACCOUNT-1');
     expect(user.displayName, '김민준');
-    expect(user.consentRecord.legacyCombined, isFalse);
     expect((await tokenStorage.read())?.refreshToken, 'REFRESH-1');
   });
 
@@ -169,7 +181,6 @@ void main() {
     expect(user.displayName, '서버 정규화 이름');
     expect(user.callbackContact, '+82-10-1234-5678');
     expect(user.organizationName, '한성구급대');
-    expect(user.consentRecord.collectionUseVersion, 'COLLECTION_USE_DEV_1.0');
   });
 
   test('연락처 동의 오류에서는 인증 정보를 유지하고 프로필 수정 실패를 전달한다', () async {
@@ -466,11 +477,7 @@ Map<String, dynamic> _tokenResponse(String accessToken, String refreshToken) {
   return <String, dynamic>{
     'tokenType': 'Bearer',
     'accessToken': accessToken,
-    'accessTokenExpiresAt': '2026-08-05T09:15:00Z',
     'refreshToken': refreshToken,
-    'refreshTokenExpiresAt': '2026-08-12T09:00:00Z',
-    'accountId': 'ACCOUNT-1',
-    'organizationId': 'EMS-1',
     'role': 'PARAMEDIC',
   };
 }
@@ -483,15 +490,7 @@ Map<String, dynamic> _profileResponse({
     'accountId': 'ACCOUNT-1',
     'loginId': 'paramedic01',
     'displayName': displayName,
-    'organizationId': 'EMS-1',
     'organizationName': '한성구급대',
-    'role': 'PARAMEDIC',
     'callbackContact': callbackContact,
-    'privacyConsent': <String, dynamic>{
-      'collectionUsePolicyVersion': 'COLLECTION_USE_DEV_1.0',
-      'hospitalProvisionPolicyVersion': 'HOSPITAL_PROVISION_DEV_1.0',
-      'consentedAt': '2026-08-05T09:00:00Z',
-      'legacyCombined': false,
-    },
   };
 }

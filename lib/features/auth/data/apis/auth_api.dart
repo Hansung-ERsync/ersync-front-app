@@ -18,9 +18,7 @@ abstract class AuthApi {
   );
 
   @POST('/api/v1/auth/signups/paramedic')
-  Future<ParamedicSignupResponseDto> signUpParamedic(
-    @Body() ParamedicSignupRequestDto request,
-  );
+  Future<void> signUpParamedic(@Body() ParamedicSignupRequestDto request);
 
   @POST('/api/v1/auth/login')
   Future<AuthTokenResponseDto> login(@Body() LoginRequestDto request);

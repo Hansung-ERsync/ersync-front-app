@@ -96,6 +96,8 @@ void main() {
 
   test('응답이 유실된 명령은 같은 멱등성 키와 최초 body로 재시도한다', () async {
     final List<RequestOptions> captured = <RequestOptions>[];
+    final InMemoryPendingTransportCommandStore pendingCommandStore =
+        InMemoryPendingTransportCommandStore();
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
         captured.add(request);
@@ -105,14 +107,11 @@ void main() {
             type: DioExceptionType.receiveTimeout,
           );
         }
-        return _jsonResponse(<String, Object?>{
-          'transportRequestId': 'REQUEST-RETRY',
-          'status': 'CANCELLED',
-        });
+        return ResponseBody.fromString('', 200);
       });
     final ApiTransportRepository repository = ApiTransportRepository(
       dio,
-      pendingCommandStore: InMemoryPendingTransportCommandStore(),
+      pendingCommandStore: pendingCommandStore,
     );
 
     await expectLater(
@@ -145,6 +144,7 @@ void main() {
     );
     expect(_requestJson(captured[1]), _requestJson(captured[0]));
     expect(_requestJson(captured[1])['detail'], '최초 body');
+    expect(await pendingCommandStore.read('cancel:REQUEST-RETRY'), isNull);
   });
 
   test('오래된 임상 기록의 snapshotUpdated false를 호출자에게 전달한다', () async {

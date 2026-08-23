@@ -1,21 +1,12 @@
-enum RealtimeSignalKind { connected, update }
-
 class RealtimeSignal {
-  const RealtimeSignal({
-    required this.kind,
-    this.eventId,
-    this.type,
-    this.aggregateType,
-    this.aggregateId,
-    this.occurredAt,
-  });
+  const RealtimeSignal({this.eventId, this.type, this.aggregateId});
 
-  const RealtimeSignal.connected() : this(kind: RealtimeSignalKind.connected);
+  const RealtimeSignal.connected()
+    : eventId = null,
+      type = null,
+      aggregateId = null;
 
-  final RealtimeSignalKind kind;
   final String? eventId;
   final String? type;
-  final String? aggregateType;
   final String? aggregateId;
-  final DateTime? occurredAt;
 }

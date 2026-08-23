@@ -147,12 +147,9 @@ class ApiRealtimeSignalSource implements RealtimeSignalSource {
       }
       final Map<String, dynamic> json = Map<String, dynamic>.from(decoded);
       return RealtimeSignal(
-        kind: RealtimeSignalKind.update,
         eventId: _string(json['eventId']) ?? eventId,
         type: _string(json['type']),
-        aggregateType: _string(json['aggregateType']),
         aggregateId: _string(json['aggregateId']),
-        occurredAt: DateTime.tryParse(_string(json['occurredAt']) ?? ''),
       );
     } on FormatException {
       return null;

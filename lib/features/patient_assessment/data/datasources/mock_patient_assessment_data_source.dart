@@ -52,8 +52,6 @@ class MockPatientAssessmentDataSource {
         : existingIndex + 1;
     return TransferRequestReceipt(
       requestId: 'REQ-MOCK-${requestNumber.toString().padLeft(4, '0')}',
-      status: 'SEARCHING',
-      protocolVersion: draft.assessmentProtocolVersion,
       createdAt: DateTime.now(),
       currentSearchRadiusKm: 10,
       radiusStepKm: 10,

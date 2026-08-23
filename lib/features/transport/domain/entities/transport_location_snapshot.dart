@@ -1,9 +1,6 @@
 class TransportLocationSnapshot {
   const TransportLocationSnapshot({
     required this.freshness,
-    this.latitude,
-    this.longitude,
-    this.capturedAt,
     this.ageSeconds,
     this.routeEstimateStatus,
     this.routeDistanceMeters,
@@ -14,9 +11,6 @@ class TransportLocationSnapshot {
   });
 
   final String freshness;
-  final double? latitude;
-  final double? longitude;
-  final DateTime? capturedAt;
   final int? ageSeconds;
   final String? routeEstimateStatus;
   final int? routeDistanceMeters;

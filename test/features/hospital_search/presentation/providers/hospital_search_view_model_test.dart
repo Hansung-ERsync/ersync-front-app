@@ -115,7 +115,6 @@ void main() {
 
     signals.add(
       const RealtimeSignal(
-        kind: RealtimeSignalKind.update,
         type: 'HOSPITAL_OFFER_RESPONDED',
         aggregateId: 'REQUEST-1',
       ),
@@ -169,7 +168,6 @@ void main() {
     expect(container.read(hospitalSearchViewModelProvider).isCancelled, isTrue);
     signals.add(
       const RealtimeSignal(
-        kind: RealtimeSignalKind.update,
         type: 'TRANSPORT_CANCELLED',
         aggregateId: 'REQUEST-CANCELLED',
       ),

@@ -65,12 +65,7 @@ class MockTransportRepository implements TransportRepository {
     String requestId,
     TransportLocationUpdate update,
     String idempotencyKey,
-  ) async => TransportLocationSnapshot(
-    freshness: 'CURRENT',
-    latitude: update.latitude,
-    longitude: update.longitude,
-    capturedAt: update.capturedAt,
-  );
+  ) async => TransportLocationSnapshot(freshness: 'CURRENT');
 
   @override
   Future<void> cancelRequest(

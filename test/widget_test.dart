@@ -3,8 +3,6 @@ import 'package:er_sync/core/assets/app_assets.dart';
 import 'package:er_sync/core/theme/app_colors.dart';
 import 'package:er_sync/features/auth/data/datasources/mock_auth_data_source.dart';
 import 'package:er_sync/features/auth/domain/entities/auth_user.dart';
-import 'package:er_sync/features/auth/domain/entities/invitation_info.dart';
-import 'package:er_sync/features/auth/domain/entities/privacy_consent_record.dart';
 import 'package:er_sync/features/auth/presentation/providers/auth_view_model.dart';
 import 'package:er_sync/features/home/presentation/pages/home_page.dart';
 import 'package:er_sync/features/home/presentation/widgets/recent_transport_list.dart';
@@ -1812,17 +1810,11 @@ class _AuthenticatedAuthViewModel extends AuthViewModel {
   AuthState build() {
     return AuthState(
       user: AuthUser(
+        accountId: 'mock-account-paramedic01',
         username: MockAuthDataSource.mockUsername,
         displayName: '김민준',
         organizationName: '강동소방서 3구급대',
-        role: UserRole.paramedic,
         callbackContact: MockAuthDataSource.mockCallbackContact,
-        consentRecord: PrivacyConsentRecord(
-          collectionUseVersion: MockAuthDataSource.collectionUseConsentVersion,
-          hospitalProvisionVersion:
-              MockAuthDataSource.hospitalProvisionConsentVersion,
-          acceptedAt: DateTime(2026, 8, 1, 9),
-        ),
       ),
     );
   }

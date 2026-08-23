@@ -53,16 +53,12 @@ class InvitationInfo {
     required this.code,
     required this.organizationName,
     required this.role,
-    this.organizationId = '',
-    this.expiresAt,
     this.requiredConsents = const <RequiredPrivacyConsent>[],
   });
 
   final String code;
-  final String organizationId;
   final String organizationName;
   final UserRole role;
-  final DateTime? expiresAt;
   final List<RequiredPrivacyConsent> requiredConsents;
 
   String? consentVersion(PrivacyConsentType type) {

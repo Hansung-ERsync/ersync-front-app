@@ -2,7 +2,6 @@ import '../../../../core/error/app_exception.dart';
 import '../../domain/entities/auth_user.dart';
 import '../../domain/entities/invitation_info.dart';
 import '../../domain/paramedic_profile_input_validator.dart';
-import '../../domain/entities/privacy_consent_record.dart';
 
 class MockAuthDataSource {
   MockAuthDataSource()
@@ -15,17 +14,12 @@ class MockAuthDataSource {
       },
       _accounts = <String, _MockAccountRecord>{
         mockUsername: _MockAccountRecord(
+          accountId: 'mock-account-paramedic01',
           username: mockUsername,
           password: mockPassword,
           displayName: '김민준',
           organizationName: '강동소방서 3구급대',
-          role: UserRole.paramedic,
           callbackContact: mockCallbackContact,
-          consentRecord: PrivacyConsentRecord(
-            collectionUseVersion: collectionUseConsentVersion,
-            hospitalProvisionVersion: hospitalProvisionConsentVersion,
-            acceptedAt: DateTime(2026, 8, 1, 9),
-          ),
         ),
       };
 
@@ -87,17 +81,12 @@ class MockAuthDataSource {
     }
 
     _accounts[normalizedUsername] = _MockAccountRecord(
+      accountId: 'mock-account-$normalizedUsername',
       username: normalizedUsername,
       password: password,
       displayName: displayName.trim(),
       organizationName: invitation.organizationName,
-      role: invitation.role,
       callbackContact: normalizedContact,
-      consentRecord: PrivacyConsentRecord(
-        collectionUseVersion: collectionUseConsentVersion,
-        hospitalProvisionVersion: hospitalProvisionConsentVersion,
-        acceptedAt: DateTime.now(),
-      ),
     );
     invitationRecord.isUsed = true;
   }
@@ -194,31 +183,28 @@ class _MockInvitationRecord {
 
 class _MockAccountRecord {
   _MockAccountRecord({
+    required this.accountId,
     required this.username,
     required this.password,
     required this.displayName,
     required this.organizationName,
-    required this.role,
     required this.callbackContact,
-    required this.consentRecord,
   });
 
+  final String accountId;
   final String username;
   final String password;
   String displayName;
   final String organizationName;
-  final UserRole role;
   String callbackContact;
-  final PrivacyConsentRecord consentRecord;
 
   AuthUser toEntity() {
     return AuthUser(
+      accountId: accountId,
       username: username,
       displayName: displayName,
       organizationName: organizationName,
-      role: role,
       callbackContact: callbackContact,
-      consentRecord: consentRecord,
     );
   }
 }

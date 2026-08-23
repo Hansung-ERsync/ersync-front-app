@@ -97,8 +97,6 @@ class ApiPatientAssessmentRepository implements PatientAssessmentRepository {
       final Map<String, Object?> json = _jsonObject(response.data);
       return TransferRequestReceipt(
         requestId: _requiredString(json, 'transportRequestId'),
-        status: _requiredString(json, 'status'),
-        protocolVersion: _requiredString(json, 'assessmentProtocolVersion'),
         createdAt: DateTime.parse(_requiredString(json, 'createdAt')).toLocal(),
         currentSearchRadiusKm: 10,
         radiusStepKm: 10,

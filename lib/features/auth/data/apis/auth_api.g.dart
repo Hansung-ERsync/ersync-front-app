@@ -48,15 +48,13 @@ class _AuthApi implements AuthApi {
   }
 
   @override
-  Future<ParamedicSignupResponseDto> signUpParamedic(
-    ParamedicSignupRequestDto request,
-  ) async {
+  Future<void> signUpParamedic(ParamedicSignupRequestDto request) async {
     final _extra = <String, dynamic>{};
     final queryParameters = <String, dynamic>{};
     final _headers = <String, dynamic>{};
     final _data = <String, dynamic>{};
     _data.addAll(request.toJson());
-    final _options = _setStreamType<ParamedicSignupResponseDto>(
+    final _options = _setStreamType<void>(
       Options(method: 'POST', headers: _headers, extra: _extra)
           .compose(
             _dio.options,
@@ -66,15 +64,7 @@ class _AuthApi implements AuthApi {
           )
           .copyWith(baseUrl: _combineBaseUrls(_dio.options.baseUrl, baseUrl)),
     );
-    final _result = await _dio.fetch<Map<String, dynamic>>(_options);
-    late ParamedicSignupResponseDto _value;
-    try {
-      _value = ParamedicSignupResponseDto.fromJson(_result.data!);
-    } on Object catch (e, s) {
-      errorLogger?.logError(e, s, _options);
-      rethrow;
-    }
-    return _value;
+    await _dio.fetch<void>(_options);
   }
 
   @override

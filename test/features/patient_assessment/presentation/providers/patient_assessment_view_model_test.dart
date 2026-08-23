@@ -200,8 +200,6 @@ class _RecordingPatientAssessmentRepository
     events.add('submit');
     return TransferRequestReceipt(
       requestId: 'REQUEST-1',
-      status: 'SEARCHING',
-      protocolVersion: draft.assessmentProtocolVersion,
       createdAt: DateTime(2026, 8, 17, 15),
       currentSearchRadiusKm: 10,
       radiusStepKm: 10,

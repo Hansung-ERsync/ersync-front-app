@@ -85,7 +85,6 @@ void main() {
     );
     signals.add(
       const RealtimeSignal(
-        kind: RealtimeSignalKind.update,
         eventId: 'EVENT-OTHER',
         type: 'HOSPITAL_ACCEPTANCE_WITHDRAWN',
         aggregateId: 'OFFER-OTHER',
@@ -113,7 +112,6 @@ void main() {
     );
     signals.add(
       const RealtimeSignal(
-        kind: RealtimeSignalKind.update,
         eventId: 'EVENT-CURRENT',
         type: 'HOSPITAL_ACCEPTANCE_WITHDRAWN',
         aggregateId: 'OFFER-CURRENT',

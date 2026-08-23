@@ -21,7 +21,6 @@ void main() {
           'status': 'CANCELLED',
           'currentDestinationOfferId': null,
           'currentAttempt': <String, Object?>{
-            'dispatchAttemptId': 'ATTEMPT-1',
             'number': 1,
             'status': 'CANCELLED',
             'currentRadiusKm': 100,
@@ -60,7 +59,6 @@ void main() {
           'status': 'SEARCHING',
           'currentDestinationOfferId': null,
           'currentAttempt': <String, Object?>{
-            'dispatchAttemptId': 'ATTEMPT-RECOVERY',
             'number': 2,
             'status': 'SEARCHING',
             'triggerType': 'ACCEPTANCE_WITHDRAWAL',
@@ -132,7 +130,6 @@ void main() {
           'status': 'ACCEPTED_AVAILABLE',
           'currentDestinationOfferId': null,
           'currentAttempt': <String, Object?>{
-            'dispatchAttemptId': 'ATTEMPT-ACCEPTED',
             'number': 1,
             'status': 'ACCEPTED_AVAILABLE',
             'currentRadiusKm': 100,

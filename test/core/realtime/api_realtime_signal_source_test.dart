@@ -38,12 +38,9 @@ void main() {
     expect(captured.headers[Headers.acceptHeader], 'text/event-stream');
     expect(captured.extra[NetworkRequestExtraKeys.requiresAuth], isTrue);
     expect(signals, hasLength(2));
-    expect(signals.first.kind, RealtimeSignalKind.connected);
-    expect(signals.last.kind, RealtimeSignalKind.update);
     expect(signals.last.eventId, 'EVENT-1');
     expect(signals.last.type, 'HOSPITAL_OFFER_RESPONDED');
     expect(signals.last.aggregateId, 'REQUEST-1');
-    expect(signals.last.occurredAt, DateTime.utc(2026, 8, 5, 6));
   });
 }
 

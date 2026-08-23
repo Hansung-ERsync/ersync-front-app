@@ -690,9 +690,6 @@ class ApiTransportRepository implements TransportRepository {
     final String freshness = _string(json, 'freshness');
     return TransportLocationSnapshot(
       freshness: freshness,
-      latitude: _double(json['latitude']),
-      longitude: _double(json['longitude']),
-      capturedAt: _nullableDate(json['capturedAt']),
       ageSeconds: _int(json['ageSeconds']),
       routeEstimateStatus: _optionalString(json['routeEstimateStatus']),
       routeDistanceMeters: _int(json['routeDistanceMeters']),
