@@ -36,42 +36,29 @@ class SettingsPage extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            user?.organizationName ?? '-',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: AppColors.textTertiary),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
                             '${user?.displayName ?? '-'} 대원',
                             style: Theme.of(context).textTheme.titleLarge
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           const SizedBox(height: 6),
-                          Row(
-                            children: <Widget>[
-                              Expanded(
-                                child: Text(
-                                  user?.username ?? '-',
-                                  style: Theme.of(context).textTheme.bodyMedium
-                                      ?.copyWith(
-                                        color: AppColors.textSecondary,
-                                      ),
-                                ),
-                              ),
-                              const Text(
-                                '프로필 수정',
-                                style: TextStyle(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
+                          Text(
+                            user?.organizationName ?? '-',
+                            key: const Key('settingsOrganizationName'),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: AppColors.textSecondary),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const Text(
+                      '프로필 수정',
+                      style: TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     const Icon(
                       Icons.chevron_right_rounded,
                       color: AppColors.textTertiary,

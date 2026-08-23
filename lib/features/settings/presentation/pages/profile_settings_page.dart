@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/korean_mobile_phone_formatter.dart';
 import '../../../auth/domain/entities/auth_user.dart';
 import '../../../auth/domain/paramedic_profile_input_validator.dart';
 import '../../../auth/presentation/providers/auth_view_model.dart';
@@ -17,6 +18,8 @@ class ProfileSettingsPage extends ConsumerStatefulWidget {
 
 class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _organizationNameController =
+      TextEditingController();
   final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _callbackContactController =
       TextEditingController();
@@ -30,6 +33,7 @@ class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
 
   @override
   void dispose() {
+    _organizationNameController.dispose();
     _displayNameController.dispose();
     _callbackContactController.dispose();
     super.dispose();
@@ -81,15 +85,9 @@ class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
     if (user == null) {
       return;
     }
+    _organizationNameController.text = user.organizationName;
     _displayNameController.text = user.displayName;
     _callbackContactController.text = user.callbackContact;
-  }
-
-  String _formatDateTime(DateTime value) {
-    final DateTime local = value.toLocal();
-    String twoDigits(int number) => number.toString().padLeft(2, '0');
-    return '${local.year}.${twoDigits(local.month)}.${twoDigits(local.day)} '
-        '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
 
   void _handleFailure(AuthState authState, {required bool wasSaving}) {
@@ -128,7 +126,6 @@ class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final AuthState authState = ref.watch(authViewModelProvider);
-    final AuthUser? user = authState.user;
     final bool busy = authState.isProfileLoading || authState.isProfileSaving;
 
     return Scaffold(
@@ -151,38 +148,25 @@ class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
             const LinearProgressIndicator(key: Key('profileLoadingIndicator')),
             const SizedBox(height: 20),
           ],
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceMuted,
-              borderRadius: BorderRadius.all(Radius.circular(12)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  user?.organizationName ?? '-',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  user?.username ?? '-',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
           Form(
             key: _formKey,
             autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
+                Text(
+                  '소속 구급대',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  key: const Key('profileOrganizationNameField'),
+                  controller: _organizationNameController,
+                  enabled: false,
+                ),
+                const SizedBox(height: 24),
                 Text(
                   '표시 이름',
                   style: Theme.of(
@@ -214,10 +198,10 @@ class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
                   keyboardType: TextInputType.phone,
                   textInputAction: TextInputAction.done,
                   autofillHints: const <String>[AutofillHints.telephoneNumber],
-                  decoration: const InputDecoration(
-                    hintText: '010-1234-5678',
-                    helperText: '숫자 또는 +로 시작하고 숫자와 -만 사용할 수 있습니다.',
-                  ),
+                  inputFormatters: const <KoreanMobilePhoneFormatter>[
+                    KoreanMobilePhoneFormatter(),
+                  ],
+                  decoration: const InputDecoration(hintText: '010-0000-0000'),
                   validator:
                       ParamedicProfileInputValidator.callbackContactError,
                   onFieldSubmitted: busy ? null : (_) => _saveProfile(),
@@ -229,55 +213,6 @@ class _ProfileSettingsPageState extends ConsumerState<ProfileSettingsPage> {
                     color: AppColors.textSecondary,
                     fontSize: 12,
                     height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Container(
-                  key: const Key('profilePrivacyConsentSummary'),
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: AppColors.positiveBackground,
-                    borderRadius: BorderRadius.all(Radius.circular(12)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const Row(
-                        children: <Widget>[
-                          Icon(
-                            Icons.verified_user_outlined,
-                            size: 20,
-                            color: AppColors.statusPositive,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            '연락처 개인정보 동의 완료',
-                            style: TextStyle(
-                              color: AppColors.statusPositive,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        '수집·이용 ${user?.consentRecord.collectionUseVersion ?? '-'}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        '병원 제공 ${user?.consentRecord.hospitalProvisionVersion ?? '-'}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        user == null
-                            ? '동의 일시 -'
-                            : '동의 일시 ${_formatDateTime(user.consentRecord.acceptedAt)}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
                   ),
                 ),
                 const SizedBox(height: 28),

@@ -12,14 +12,14 @@ void main() {
     );
   });
 
-  test('회신 연락처는 8~30자이며 숫자 또는 +로 시작하고 숫자와 -만 허용한다', () {
+  test('회신 연락처는 회원가입과 같은 010-0000-0000 형식만 허용한다', () {
     expect(
       ParamedicProfileInputValidator.callbackContactError('010-1234-5678'),
       isNull,
     );
     expect(
       ParamedicProfileInputValidator.callbackContactError('+82-10-1234-5678'),
-      isNull,
+      isNotNull,
     );
     expect(
       ParamedicProfileInputValidator.callbackContactError('02 1234 5678'),

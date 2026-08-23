@@ -1599,15 +1599,54 @@ void main() {
 
     await tester.tap(find.byKey(const Key('settingsButton')));
     await tester.pumpAndSettle();
+    final Finder profileSettingsButton = find.byKey(
+      const Key('profileSettingsButton'),
+    );
+    final Finder profileEditLabel = find.descendant(
+      of: profileSettingsButton,
+      matching: find.text('프로필 수정'),
+    );
+    final Finder profileChevron = find.descendant(
+      of: profileSettingsButton,
+      matching: find.byIcon(Icons.chevron_right_rounded),
+    );
+    expect(
+      (tester.getCenter(profileEditLabel).dy -
+              tester.getCenter(profileChevron).dy)
+          .abs(),
+      lessThan(1),
+    );
+    expect(
+      find.descendant(
+        of: profileSettingsButton,
+        matching: find.text(MockAuthDataSource.mockUsername),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: profileSettingsButton,
+        matching: find.text('강동소방서 3구급대'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('profileSettingsButton')));
     await tester.pumpAndSettle();
 
     expect(find.text('내 프로필'), findsOneWidget);
-    expect(
-      find.byKey(const Key('profilePrivacyConsentSummary')),
-      findsOneWidget,
+    expect(find.text(MockAuthDataSource.mockUsername), findsNothing);
+    expect(find.text('강동소방서 3구급대'), findsOneWidget);
+    final Finder profileOrganizationNameField = find.byKey(
+      const Key('profileOrganizationNameField'),
     );
-    expect(find.text('연락처 개인정보 동의 완료'), findsOneWidget);
+    expect(profileOrganizationNameField, findsOneWidget);
+    expect(
+      tester.widget<TextFormField>(profileOrganizationNameField).enabled,
+      isFalse,
+    );
+    expect(find.byKey(const Key('profilePrivacyConsentSummary')), findsNothing);
+    expect(find.text('연락처 개인정보 동의 완료'), findsNothing);
+    expect(find.text('숫자 또는 +로 시작하고 숫자와 -만 사용할 수 있습니다.'), findsNothing);
     final EditableText initialName = tester.widget<EditableText>(
       find.descendant(
         of: find.byKey(const Key('profileDisplayNameField')),
@@ -1632,7 +1671,7 @@ void main() {
     );
     await tester.enterText(
       find.byKey(const Key('profileCallbackContactField')),
-      '02 123',
+      '02123',
     );
     await tester.pump();
     await tester.ensureVisible(find.byKey(const Key('saveProfileButton')));
@@ -1640,7 +1679,7 @@ void main() {
     await tester.tap(find.byKey(const Key('saveProfileButton')));
     await tester.pump();
     expect(find.text('이름은 2~50자로 입력해주세요'), findsOneWidget);
-    expect(find.text('연락처는 8~30자로 입력해주세요'), findsOneWidget);
+    expect(find.text('010-0000-0000 형식으로 입력해주세요'), findsOneWidget);
 
     await tester.enterText(
       find.byKey(const Key('profileDisplayNameField')),
@@ -1648,9 +1687,16 @@ void main() {
     );
     await tester.enterText(
       find.byKey(const Key('profileCallbackContactField')),
-      '+82-10-1111-2222',
+      '01011112222999',
     );
     await tester.pump();
+    final EditableText formattedContact = tester.widget<EditableText>(
+      find.descendant(
+        of: find.byKey(const Key('profileCallbackContactField')),
+        matching: find.byType(EditableText),
+      ),
+    );
+    expect(formattedContact.controller.text, '010-1111-2222');
     await tester.ensureVisible(find.byKey(const Key('saveProfileButton')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('saveProfileButton')));
@@ -1662,13 +1708,18 @@ void main() {
     );
     expect(container.read(authViewModelProvider).user?.displayName, '박새별');
     expect(
+      container.read(authViewModelProvider).user?.organizationName,
+      '강동소방서 3구급대',
+    );
+    expect(
       container.read(authViewModelProvider).user?.callbackContact,
-      '+82-10-1111-2222',
+      '010-1111-2222',
     );
 
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('박새별 대원'), findsOneWidget);
+    expect(find.text('강동소방서 3구급대'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('박새별 대원'), findsOneWidget);

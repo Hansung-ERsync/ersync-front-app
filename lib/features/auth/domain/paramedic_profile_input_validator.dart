@@ -4,9 +4,7 @@ class ParamedicProfileInputValidator {
   static final RegExp _controlCharacters = RegExp(
     r'[\u0000-\u001F\u007F-\u009F]',
   );
-  static final RegExp _callbackContactPattern = RegExp(
-    r'^(?:\+|[0-9])[0-9-]*$',
-  );
+  static final RegExp _callbackContactPattern = RegExp(r'^010-\d{4}-\d{4}$');
 
   static String? displayNameError(String? value) {
     final String displayName = value?.trim() ?? '';
@@ -28,12 +26,8 @@ class ParamedicProfileInputValidator {
     if (callbackContact.isEmpty) {
       return '병원 회신 연락처를 입력해주세요';
     }
-    final int length = callbackContact.runes.length;
-    if (length < 8 || length > 30) {
-      return '연락처는 8~30자로 입력해주세요';
-    }
     if (!_callbackContactPattern.hasMatch(callbackContact)) {
-      return '숫자 또는 +로 시작하고 숫자와 -만 사용해주세요';
+      return '010-0000-0000 형식으로 입력해주세요';
     }
     return null;
   }
