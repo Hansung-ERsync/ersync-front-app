@@ -1,4 +1,5 @@
 import '../entities/in_transit_vital_update.dart';
+import '../entities/clinical_update_result.dart';
 import '../repositories/transport_repository.dart';
 
 class AddInTransitVitalUpdate {
@@ -6,7 +7,10 @@ class AddInTransitVitalUpdate {
 
   final TransportRepository _repository;
 
-  Future<void> call(String requestId, InTransitVitalUpdate update) {
+  Future<ClinicalUpdateResult> call(
+    String requestId,
+    InTransitVitalUpdate update,
+  ) {
     return _repository.addVitalUpdate(requestId, update);
   }
 }

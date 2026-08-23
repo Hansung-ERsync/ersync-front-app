@@ -26,6 +26,18 @@ class PatientTransportSummary {
     this.medications,
     this.isolationConcern,
     this.supplementalAssessedAt,
+    this.occurrenceLabel,
+    this.occurrenceDetail,
+    this.injuryMechanismLabel,
+    this.injurySitesLabel,
+    this.primarySymptomDetail,
+    this.secondarySymptomsLabel,
+    this.onsetLabel,
+    this.preKtasDetailLabel,
+    this.consciousnessDetailLabel,
+    this.latestTreatmentLabel,
+    this.latestTreatmentAt,
+    this.lastClinicalUpdateAt,
   });
 
   const PatientTransportSummary.empty()
@@ -54,7 +66,19 @@ class PatientTransportSummary {
       allergies = null,
       medications = null,
       isolationConcern = null,
-      supplementalAssessedAt = null;
+      supplementalAssessedAt = null,
+      occurrenceLabel = null,
+      occurrenceDetail = null,
+      injuryMechanismLabel = null,
+      injurySitesLabel = null,
+      primarySymptomDetail = null,
+      secondarySymptomsLabel = null,
+      onsetLabel = null,
+      preKtasDetailLabel = null,
+      consciousnessDetailLabel = null,
+      latestTreatmentLabel = null,
+      latestTreatmentAt = null,
+      lastClinicalUpdateAt = null;
 
   final String ageLabel;
   final String sexLabel;
@@ -82,6 +106,27 @@ class PatientTransportSummary {
   final String? medications;
   final bool? isolationConcern;
   final DateTime? supplementalAssessedAt;
+  final String? occurrenceLabel;
+  final String? occurrenceDetail;
+  final String? injuryMechanismLabel;
+  final String? injurySitesLabel;
+  final String? primarySymptomDetail;
+  final String? secondarySymptomsLabel;
+  final String? onsetLabel;
+  final String? preKtasDetailLabel;
+  final String? consciousnessDetailLabel;
+  final String? latestTreatmentLabel;
+  final DateTime? latestTreatmentAt;
+  final DateTime? lastClinicalUpdateAt;
+
+  bool get hasIncidentDetails =>
+      occurrenceLabel != null ||
+      occurrenceDetail != null ||
+      injuryMechanismLabel != null ||
+      injurySitesLabel != null ||
+      primarySymptomDetail != null ||
+      secondarySymptomsLabel != null ||
+      onsetLabel != null;
 
   bool get hasSupplementalAssessment =>
       glucoseMgDl != null ||
@@ -119,6 +164,7 @@ class PatientTransportSummary {
     required double temperature,
     required double oxygenSaturation,
     required DateTime measuredAt,
+    DateTime? lastClinicalUpdateAt,
   }) {
     return PatientTransportSummary(
       ageLabel: ageLabel,
@@ -147,6 +193,18 @@ class PatientTransportSummary {
       medications: medications,
       isolationConcern: isolationConcern,
       supplementalAssessedAt: supplementalAssessedAt,
+      occurrenceLabel: occurrenceLabel,
+      occurrenceDetail: occurrenceDetail,
+      injuryMechanismLabel: injuryMechanismLabel,
+      injurySitesLabel: injurySitesLabel,
+      primarySymptomDetail: primarySymptomDetail,
+      secondarySymptomsLabel: secondarySymptomsLabel,
+      onsetLabel: onsetLabel,
+      preKtasDetailLabel: preKtasDetailLabel,
+      consciousnessDetailLabel: consciousnessDetailLabel,
+      latestTreatmentLabel: latestTreatmentLabel,
+      latestTreatmentAt: latestTreatmentAt,
+      lastClinicalUpdateAt: lastClinicalUpdateAt ?? this.lastClinicalUpdateAt,
     );
   }
 
@@ -158,7 +216,15 @@ class PatientTransportSummary {
     return _copyWith(preKtasLabel: preKtasLabel);
   }
 
-  PatientTransportSummary _copyWith({String? preKtasLabel, String? avpuLabel}) {
+  PatientTransportSummary copyWithLastClinicalUpdateAt(DateTime? value) {
+    return _copyWith(lastClinicalUpdateAt: value);
+  }
+
+  PatientTransportSummary _copyWith({
+    String? preKtasLabel,
+    String? avpuLabel,
+    DateTime? lastClinicalUpdateAt,
+  }) {
     return PatientTransportSummary(
       ageLabel: ageLabel,
       sexLabel: sexLabel,
@@ -186,6 +252,18 @@ class PatientTransportSummary {
       medications: medications,
       isolationConcern: isolationConcern,
       supplementalAssessedAt: supplementalAssessedAt,
+      occurrenceLabel: occurrenceLabel,
+      occurrenceDetail: occurrenceDetail,
+      injuryMechanismLabel: injuryMechanismLabel,
+      injurySitesLabel: injurySitesLabel,
+      primarySymptomDetail: primarySymptomDetail,
+      secondarySymptomsLabel: secondarySymptomsLabel,
+      onsetLabel: onsetLabel,
+      preKtasDetailLabel: preKtasDetailLabel,
+      consciousnessDetailLabel: consciousnessDetailLabel,
+      latestTreatmentLabel: latestTreatmentLabel,
+      latestTreatmentAt: latestTreatmentAt,
+      lastClinicalUpdateAt: lastClinicalUpdateAt ?? this.lastClinicalUpdateAt,
     );
   }
 }

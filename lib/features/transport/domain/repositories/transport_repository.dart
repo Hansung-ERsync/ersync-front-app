@@ -4,31 +4,36 @@ import '../entities/recent_transport.dart';
 import '../entities/transport_session.dart';
 import '../entities/transport_location_update.dart';
 import '../entities/active_transport_recovery.dart';
+import '../entities/clinical_update_result.dart';
+import '../entities/transport_location_snapshot.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
 
 abstract interface class TransportRepository {
   Future<ActiveTransportRecovery?> recoverActiveTransport();
 
-  Future<void> addVitalUpdate(String requestId, InTransitVitalUpdate update);
+  Future<ClinicalUpdateResult> addVitalUpdate(
+    String requestId,
+    InTransitVitalUpdate update,
+  );
 
-  Future<void> addConsciousnessUpdate(
+  Future<ClinicalUpdateResult> addConsciousnessUpdate(
     String requestId,
     InTransitConsciousnessUpdate update,
   );
 
-  Future<void> addPreKtasUpdate(
+  Future<ClinicalUpdateResult> addPreKtasUpdate(
     String requestId,
     InTransitPreKtasUpdate update,
   );
 
-  Future<void> addTreatmentUpdate(
+  Future<ClinicalUpdateResult> addTreatmentUpdate(
     String requestId,
     InTransitTreatmentUpdate update,
   );
 
   Future<void> requestHandoff(TransportSession session);
 
-  Future<void> updateLocation(
+  Future<TransportLocationSnapshot> updateLocation(
     String requestId,
     TransportLocationUpdate update,
     String idempotencyKey,

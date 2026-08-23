@@ -4,6 +4,8 @@ import '../../domain/entities/recent_transport.dart';
 import '../../domain/entities/transport_session.dart';
 import '../../domain/entities/transport_location_update.dart';
 import '../../domain/entities/active_transport_recovery.dart';
+import '../../domain/entities/clinical_update_result.dart';
+import '../../domain/entities/transport_location_snapshot.dart';
 import '../../domain/repositories/transport_repository.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
 import '../datasources/mock_transport_data_source.dart';
@@ -17,12 +19,15 @@ class MockTransportRepository implements TransportRepository {
   Future<ActiveTransportRecovery?> recoverActiveTransport() async => null;
 
   @override
-  Future<void> addVitalUpdate(String requestId, InTransitVitalUpdate update) {
+  Future<ClinicalUpdateResult> addVitalUpdate(
+    String requestId,
+    InTransitVitalUpdate update,
+  ) {
     return _dataSource.addVitalUpdate(requestId, update);
   }
 
   @override
-  Future<void> addConsciousnessUpdate(
+  Future<ClinicalUpdateResult> addConsciousnessUpdate(
     String requestId,
     InTransitConsciousnessUpdate update,
   ) {
@@ -30,7 +35,7 @@ class MockTransportRepository implements TransportRepository {
   }
 
   @override
-  Future<void> addPreKtasUpdate(
+  Future<ClinicalUpdateResult> addPreKtasUpdate(
     String requestId,
     InTransitPreKtasUpdate update,
   ) {
@@ -38,7 +43,7 @@ class MockTransportRepository implements TransportRepository {
   }
 
   @override
-  Future<void> addTreatmentUpdate(
+  Future<ClinicalUpdateResult> addTreatmentUpdate(
     String requestId,
     InTransitTreatmentUpdate update,
   ) {
@@ -56,11 +61,16 @@ class MockTransportRepository implements TransportRepository {
   }
 
   @override
-  Future<void> updateLocation(
+  Future<TransportLocationSnapshot> updateLocation(
     String requestId,
     TransportLocationUpdate update,
     String idempotencyKey,
-  ) async {}
+  ) async => TransportLocationSnapshot(
+    freshness: 'CURRENT',
+    latitude: update.latitude,
+    longitude: update.longitude,
+    capturedAt: update.capturedAt,
+  );
 
   @override
   Future<void> cancelRequest(

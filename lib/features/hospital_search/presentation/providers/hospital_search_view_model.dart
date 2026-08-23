@@ -10,6 +10,7 @@ import '../../../../core/idempotency/idempotency_providers.dart';
 import '../../../../core/realtime/realtime_providers.dart';
 import '../../../../core/realtime/realtime_signal.dart';
 import '../../../../core/realtime/realtime_signal_source.dart';
+import '../../../transport/data/storage/pending_transport_command_providers.dart';
 import '../../domain/entities/hospital_search_progress.dart';
 import '../../domain/entities/hospital_search_session.dart';
 import '../../domain/entities/accepted_hospital.dart';
@@ -32,7 +33,11 @@ final Provider<HospitalSearchRepository> hospitalSearchRepositoryProvider =
 
 final Provider<HospitalSearchRepository> apiHospitalSearchRepositoryProvider =
     Provider<HospitalSearchRepository>(
-      (Ref ref) => ApiHospitalSearchRepository(ref.watch(dioProvider)),
+      (Ref ref) => ApiHospitalSearchRepository(
+        ref.watch(dioProvider),
+        pendingCommandStore: ref.watch(pendingTransportCommandStoreProvider),
+        idempotencyKeyGenerator: ref.watch(idempotencyKeyGeneratorProvider),
+      ),
     );
 
 final Provider<GetHospitalSearchProgress> getHospitalSearchProgressProvider =

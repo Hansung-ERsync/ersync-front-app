@@ -14,8 +14,11 @@ import '../../../../core/realtime/realtime_signal.dart';
 import '../../../hospital_search/domain/entities/hospital_search_session.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
 import '../../../hospital_search/presentation/providers/hospital_search_view_model.dart';
+import '../../data/storage/pending_transport_command_providers.dart';
 import '../../domain/entities/in_transit_clinical_updates.dart';
 import '../../domain/entities/in_transit_vital_update.dart';
+import '../../domain/entities/clinical_update_result.dart';
+import '../../domain/entities/transport_location_snapshot.dart';
 import '../../domain/entities/patient_transport_summary.dart';
 import '../../domain/entities/transport_session.dart';
 import '../../domain/entities/transport_location_update.dart';
@@ -38,9 +41,13 @@ final Provider<TransportRepository> transportRepositoryProvider =
     );
 
 final Provider<TransportRepository> apiTransportRepositoryProvider =
-    Provider<TransportRepository>(
-      (Ref ref) => ApiTransportRepository(ref.watch(dioProvider)),
-    );
+    Provider<TransportRepository>((Ref ref) {
+      return ApiTransportRepository(
+        ref.watch(dioProvider),
+        pendingCommandStore: ref.watch(pendingTransportCommandStoreProvider),
+        idempotencyKeyGenerator: ref.watch(idempotencyKeyGeneratorProvider),
+      );
+    });
 
 final Provider<AddInTransitVitalUpdate> addInTransitVitalUpdateProvider =
     Provider<AddInTransitVitalUpdate>(
@@ -84,6 +91,9 @@ class TransportViewModel extends Notifier<TransportViewState> {
     state = TransportViewState(
       session: session,
       patientSummary: session.patientSummary,
+      locationSnapshot: session.locationSnapshot,
+      latestTreatmentLabel: session.patientSummary.latestTreatmentLabel,
+      latestTreatmentAt: session.patientSummary.latestTreatmentAt,
       elapsedSeconds: _elapsedSeconds(session),
     );
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -217,7 +227,7 @@ class TransportViewModel extends Notifier<TransportViewState> {
       final DeviceLocationPoint point = await ref
           .read(deviceLocationServiceProvider)
           .getCurrentLocation();
-      await ref
+      final TransportLocationSnapshot locationSnapshot = await ref
           .read(transportRepositoryProvider)
           .updateLocation(
             session.requestId,
@@ -231,7 +241,10 @@ class TransportViewModel extends Notifier<TransportViewState> {
                 .create('location-${session.requestId}'),
           );
       if (state.session?.requestId == session.requestId) {
-        state = state.copyWith(clearLocationError: true);
+        state = state.copyWith(
+          locationSnapshot: locationSnapshot,
+          clearLocationError: true,
+        );
       }
     } catch (_) {
       if (state.session?.requestId == session.requestId) {
@@ -266,21 +279,23 @@ class TransportViewModel extends Notifier<TransportViewState> {
     }
     state = state.copyWith(isSavingVitals: true, clearError: true);
     try {
-      await ref.read(addInTransitVitalUpdateProvider)(
-        session.requestId,
-        update,
-      );
+      final ClinicalUpdateResult result = await ref.read(
+        addInTransitVitalUpdateProvider,
+      )(session.requestId, update);
       state = state.copyWith(
         isSavingVitals: false,
-        patientSummary: summary.copyWithVitals(
-          systolic: update.systolic,
-          diastolic: update.diastolic,
-          pulse: update.pulse,
-          respiratoryRate: update.respiratoryRate,
-          temperature: update.temperature,
-          oxygenSaturation: update.oxygenSaturation,
-          measuredAt: update.measuredAt,
-        ),
+        patientSummary: result.snapshotUpdated
+            ? summary.copyWithVitals(
+                systolic: update.systolic,
+                diastolic: update.diastolic,
+                pulse: update.pulse,
+                respiratoryRate: update.respiratoryRate,
+                temperature: update.temperature,
+                oxygenSaturation: update.oxygenSaturation,
+                measuredAt: update.measuredAt,
+                lastClinicalUpdateAt: result.lastClinicalUpdateAt,
+              )
+            : summary,
       );
       return true;
     } catch (_) {
@@ -302,14 +317,16 @@ class TransportViewModel extends Notifier<TransportViewState> {
     }
     state = state.copyWith(isSavingConsciousness: true, clearError: true);
     try {
-      await ref
+      final ClinicalUpdateResult result = await ref
           .read(transportRepositoryProvider)
           .addConsciousnessUpdate(session.requestId, update);
       state = state.copyWith(
         isSavingConsciousness: false,
-        patientSummary: summary.copyWithConsciousness(
-          avpuLabel: update.avpu.apiValue,
-        ),
+        patientSummary: result.snapshotUpdated
+            ? summary
+                  .copyWithConsciousness(avpuLabel: update.avpu.apiValue)
+                  .copyWithLastClinicalUpdateAt(result.lastClinicalUpdateAt)
+            : summary,
       );
       return true;
     } catch (_) {
@@ -329,7 +346,7 @@ class TransportViewModel extends Notifier<TransportViewState> {
     }
     state = state.copyWith(isSavingPreKtas: true, clearError: true);
     try {
-      await ref
+      final ClinicalUpdateResult result = await ref
           .read(transportRepositoryProvider)
           .addPreKtasUpdate(session.requestId, update);
       final String label = update.level == null
@@ -337,7 +354,11 @@ class TransportViewModel extends Notifier<TransportViewState> {
           : 'Pre-KTAS ${update.level}';
       state = state.copyWith(
         isSavingPreKtas: false,
-        patientSummary: summary.copyWithPreKtas(preKtasLabel: label),
+        patientSummary: result.snapshotUpdated
+            ? summary
+                  .copyWithPreKtas(preKtasLabel: label)
+                  .copyWithLastClinicalUpdateAt(result.lastClinicalUpdateAt)
+            : summary,
       );
       return true;
     } catch (_) {
@@ -356,14 +377,22 @@ class TransportViewModel extends Notifier<TransportViewState> {
     }
     state = state.copyWith(isSavingTreatment: true, clearError: true);
     try {
-      await ref
+      final ClinicalUpdateResult result = await ref
           .read(transportRepositoryProvider)
           .addTreatmentUpdate(session.requestId, update);
       state = state.copyWith(
         isSavingTreatment: false,
-        latestTreatmentLabel:
-            '${update.type.label} · ${update.attemptResult.label}',
-        latestTreatmentAt: update.performedAt,
+        patientSummary: result.snapshotUpdated
+            ? state.patientSummary?.copyWithLastClinicalUpdateAt(
+                result.lastClinicalUpdateAt,
+              )
+            : state.patientSummary,
+        latestTreatmentLabel: result.snapshotUpdated
+            ? '${update.type.label} · ${update.attemptResult.label}'
+            : state.latestTreatmentLabel,
+        latestTreatmentAt: result.snapshotUpdated
+            ? update.performedAt
+            : state.latestTreatmentAt,
       );
       return true;
     } catch (_) {
@@ -453,6 +482,7 @@ class TransportViewState {
   const TransportViewState({
     this.session,
     this.patientSummary,
+    this.locationSnapshot,
     this.elapsedSeconds = 0,
     this.isSavingVitals = false,
     this.isSavingConsciousness = false,
@@ -469,6 +499,7 @@ class TransportViewState {
 
   final TransportSession? session;
   final PatientTransportSummary? patientSummary;
+  final TransportLocationSnapshot? locationSnapshot;
   final int elapsedSeconds;
   final bool isSavingVitals;
   final bool isSavingConsciousness;
@@ -490,6 +521,7 @@ class TransportViewState {
 
   TransportViewState copyWith({
     PatientTransportSummary? patientSummary,
+    TransportLocationSnapshot? locationSnapshot,
     int? elapsedSeconds,
     bool? isSavingVitals,
     bool? isSavingConsciousness,
@@ -509,6 +541,7 @@ class TransportViewState {
     return TransportViewState(
       session: session,
       patientSummary: patientSummary ?? this.patientSummary,
+      locationSnapshot: locationSnapshot ?? this.locationSnapshot,
       elapsedSeconds: elapsedSeconds ?? this.elapsedSeconds,
       isSavingVitals: isSavingVitals ?? this.isSavingVitals,
       isSavingConsciousness:

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../../../../core/error/app_exception.dart';
+import '../../../../core/idempotency/idempotency_key_generator.dart';
 import '../../../../core/network/authenticated_request.dart';
 import '../../../../core/network/dio_exception_mapper.dart';
 import '../../domain/entities/accepted_hospital.dart';
@@ -8,13 +9,24 @@ import '../../domain/entities/hospital_response.dart';
 import '../../domain/entities/hospital_search_progress.dart';
 import '../../domain/entities/hospital_search_session.dart';
 import '../../domain/repositories/hospital_search_repository.dart';
+import '../../../transport/data/storage/pending_transport_command_store.dart';
 
 class ApiHospitalSearchRepository implements HospitalSearchRepository {
-  const ApiHospitalSearchRepository(this._dio);
+  ApiHospitalSearchRepository(
+    this._dio, {
+    PendingTransportCommandStore? pendingCommandStore,
+    IdempotencyKeyGenerator? idempotencyKeyGenerator,
+  }) : _pendingCommandStore =
+           pendingCommandStore ?? InMemoryPendingTransportCommandStore(),
+       _idempotencyKeyGenerator =
+           idempotencyKeyGenerator ?? IdempotencyKeyGenerator();
 
   final Dio _dio;
+  final PendingTransportCommandStore _pendingCommandStore;
+  final IdempotencyKeyGenerator _idempotencyKeyGenerator;
 
-  Options _options({String? idempotencyKey}) => Options(
+  Options _options({String? idempotencyKey, String? method}) => Options(
+    method: method,
     headers: idempotencyKey == null
         ? null
         : <String, Object>{'Idempotency-Key': idempotencyKey},
@@ -152,13 +164,16 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
     String offerId,
     String idempotencyKey,
   ) {
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/destination',
-        data: <String, Object>{'offerId': offerId},
-        options: _options(idempotencyKey: idempotencyKey),
-      );
-    });
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent(
+        operation: 'destination:$requestId',
+        method: 'POST',
+        path: '/api/v1/transport-requests/$requestId/destination',
+        body: <String, Object?>{'offerId': offerId},
+        idempotencyKeyPrefix: 'destination-$requestId',
+        preferredIdempotencyKey: idempotencyKey,
+      ),
+    );
   }
 
   @override
@@ -166,17 +181,66 @@ class ApiHospitalSearchRepository implements HospitalSearchRepository {
     String requestId,
     TransportCancellation cancellation,
   ) {
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/cancel',
-        data: <String, Object?>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent(
+        operation: 'cancel:$requestId',
+        method: 'POST',
+        path: '/api/v1/transport-requests/$requestId/cancel',
+        body: <String, Object?>{
           'reason': cancellation.reason.apiValue,
           if (cancellation.normalizedDetail != null)
             'detail': cancellation.normalizedDetail,
         },
-        options: _options(idempotencyKey: 'cancel-$requestId'),
+        idempotencyKeyPrefix: 'cancel-$requestId',
+      ),
+    );
+  }
+
+  Future<void> _sendIdempotent({
+    required String operation,
+    required String method,
+    required String path,
+    required String idempotencyKeyPrefix,
+    Map<String, Object?>? body,
+    String? preferredIdempotencyKey,
+  }) async {
+    PendingTransportCommand? command = await _pendingCommandStore.read(
+      operation,
+    );
+    command ??= PendingTransportCommand(
+      operation: operation,
+      method: method,
+      path: path,
+      idempotencyKey:
+          preferredIdempotencyKey ??
+          _idempotencyKeyGenerator.create(idempotencyKeyPrefix),
+      body: body,
+    );
+    await _pendingCommandStore.write(command);
+    try {
+      await _dio.request<Object?>(
+        command.path,
+        data: command.body,
+        options: _options(
+          method: command.method,
+          idempotencyKey: command.idempotencyKey,
+        ),
       );
-    });
+      await _pendingCommandStore.remove(operation);
+    } on DioException catch (error) {
+      if (_isDefinitiveCommandFailure(error)) {
+        await _pendingCommandStore.remove(operation);
+      }
+      rethrow;
+    }
+  }
+
+  bool _isDefinitiveCommandFailure(DioException error) {
+    final int? statusCode = error.response?.statusCode;
+    return statusCode != null &&
+        statusCode >= 400 &&
+        statusCode < 500 &&
+        statusCode != 401;
   }
 
   Map<String, Object?> _jsonObject(Object? value) {

@@ -14,6 +14,7 @@ import '../../domain/entities/in_transit_vital_update.dart';
 import '../../domain/entities/patient_transport_summary.dart';
 import '../../domain/entities/transport_session.dart';
 import '../../domain/entities/urgent_destination_withdrawal.dart';
+import '../../domain/entities/transport_location_snapshot.dart';
 import '../providers/transport_view_model.dart';
 import '../../../hospital_search/presentation/widgets/transport_cancellation_sheet.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
@@ -92,6 +93,7 @@ class _TransportInProgressPageState
                   children: <Widget>[
                     _DestinationHospitalCard(
                       session: widget.session,
+                      locationSnapshot: state.locationSnapshot,
                       onCall: _callHospital,
                       onDirections: _openDirections,
                     ),
@@ -800,17 +802,20 @@ class _HandoffRequestDialog extends StatelessWidget {
 class _DestinationHospitalCard extends StatelessWidget {
   const _DestinationHospitalCard({
     required this.session,
+    required this.locationSnapshot,
     required this.onCall,
     required this.onDirections,
   });
 
   final TransportSession session;
+  final TransportLocationSnapshot? locationSnapshot;
   final VoidCallback onCall;
   final VoidCallback onDirections;
 
   @override
   Widget build(BuildContext context) {
     final hospital = session.destination;
+    final TransportLocationSnapshot? location = locationSnapshot;
     return Container(
       key: const Key('destinationHospitalCard'),
       padding: const EdgeInsets.all(18),
@@ -847,17 +852,43 @@ class _DestinationHospitalCard extends StatelessWidget {
             children: <Widget>[
               _CompactInfo(
                 icon: Icons.near_me_outlined,
-                text: hospital.distanceLabel,
+                text: location?.routeDistanceLabel ?? hospital.distanceLabel,
               ),
-              if (hospital.etaLabel != null) ...<Widget>[
+              if (location != null || hospital.etaLabel != null) ...<Widget>[
                 const SizedBox(width: 14),
                 _CompactInfo(
                   icon: Icons.schedule_outlined,
-                  text: hospital.etaLabel!,
+                  text: location?.etaLabel ?? hospital.etaLabel!,
                 ),
               ],
             ],
           ),
+          if (location != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              location.freshnessLabel,
+              key: const Key('transportLocationFreshness'),
+              style: TextStyle(
+                color: location.isStale
+                    ? AppColors.statusChecking
+                    : AppColors.textTertiary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (location.routeStatusLabel != null) ...<Widget>[
+              const SizedBox(height: 3),
+              Text(
+                location.routeStatusLabel!,
+                key: const Key('transportRouteEstimateStatus'),
+                style: const TextStyle(
+                  color: AppColors.textTertiary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ],
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -939,9 +970,10 @@ class _PatientSummaryCard extends StatelessWidget {
                 ),
               ),
               Text(
-                summary.vitalsMeasuredAt == null
+                (summary.lastClinicalUpdateAt ?? summary.vitalsMeasuredAt) ==
+                        null
                     ? '측정 시각 확인 불가'
-                    : '최신 측정 ${formatClinicalTime(summary.vitalsMeasuredAt!)}',
+                    : '최신 갱신 ${formatClinicalTime(summary.lastClinicalUpdateAt ?? summary.vitalsMeasuredAt!)}',
                 style: const TextStyle(
                   color: AppColors.textTertiary,
                   fontSize: 12,
@@ -976,6 +1008,67 @@ class _PatientSummaryCard extends StatelessWidget {
             label: '의식 (AVPU)',
             value: _avpuValue(summary.avpuLabel),
           ),
+          if (summary.preKtasDetailLabel != null)
+            _SummaryRow(
+              rowKey: 'preKtasDetail',
+              label: '분류 예외',
+              value: summary.preKtasDetailLabel!,
+            ),
+          if (summary.consciousnessDetailLabel != null)
+            _SummaryRow(
+              rowKey: 'consciousnessDetail',
+              label: '의식 평가',
+              value: summary.consciousnessDetailLabel!,
+            ),
+          if (summary.hasIncidentDetails) ...<Widget>[
+            const SizedBox(height: 4),
+            const Divider(),
+            const SizedBox(height: 8),
+            const Text('발생 정보', style: TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            if (summary.occurrenceLabel != null)
+              _SummaryRow(
+                rowKey: 'occurrence',
+                label: '발생 구분',
+                value: summary.occurrenceLabel!,
+              ),
+            if (summary.occurrenceDetail != null)
+              _SummaryRow(
+                rowKey: 'occurrenceDetail',
+                label: '발생 상세',
+                value: summary.occurrenceDetail!,
+              ),
+            if (summary.injuryMechanismLabel != null)
+              _SummaryRow(
+                rowKey: 'injuryMechanism',
+                label: '손상 기전',
+                value: summary.injuryMechanismLabel!,
+              ),
+            if (summary.injurySitesLabel != null)
+              _SummaryRow(
+                rowKey: 'injurySites',
+                label: '손상 부위',
+                value: summary.injurySitesLabel!,
+              ),
+            if (summary.primarySymptomDetail != null)
+              _SummaryRow(
+                rowKey: 'primarySymptomDetail',
+                label: '주증상 상세',
+                value: summary.primarySymptomDetail!,
+              ),
+            if (summary.secondarySymptomsLabel != null)
+              _SummaryRow(
+                rowKey: 'secondarySymptoms',
+                label: '부증상',
+                value: summary.secondarySymptomsLabel!,
+              ),
+            if (summary.onsetLabel != null)
+              _SummaryRow(
+                rowKey: 'onset',
+                label: '발생 시각',
+                value: summary.onsetLabel!,
+              ),
+          ],
           const SizedBox(height: 4),
           const Divider(),
           const SizedBox(height: 4),

@@ -3,18 +3,21 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:er_sync/core/error/app_exception.dart';
 import 'package:er_sync/core/network/dio_factory.dart';
 import 'package:er_sync/features/hospital_search/domain/entities/hospital_search_progress.dart';
 import 'package:er_sync/features/patient_assessment/domain/entities/assessment_enums.dart';
 import 'package:er_sync/features/transport/data/repositories/api_transport_repository.dart';
+import 'package:er_sync/features/transport/data/storage/pending_transport_command_store.dart';
 import 'package:er_sync/features/transport/domain/entities/in_transit_clinical_updates.dart';
+import 'package:er_sync/features/transport/domain/entities/in_transit_vital_update.dart';
 import 'package:er_sync/features/transport/domain/entities/active_transport_recovery.dart';
 import 'package:er_sync/features/transport/domain/entities/recent_transport.dart';
 import 'package:er_sync/features/transport/domain/entities/transport_location_update.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('목적지 선택 전 취소 이력은 숨기고 목적지가 있던 취소만 표시한다', () async {
+  test('목적지가 없는 취소 이력도 누락하지 않고 표시한다', () async {
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
         expect(request.uri.queryParameters['view'], 'RECENT');
@@ -50,10 +53,12 @@ void main() {
       dio,
     ).getRecentTransports();
 
-    expect(result, hasLength(1));
-    expect(result.single.requestId, 'REQUEST-2');
-    expect(result.single.handoffStatus, HandoffStatus.cancelled);
-    expect(result.single.hospitalDisplayName, '한양대학교병원');
+    expect(result, hasLength(2));
+    expect(result.first.requestId, 'REQUEST-1');
+    expect(result.first.handoffStatus, HandoffStatus.cancelled);
+    expect(result.first.hospitalDisplayName, '목적지 미정');
+    expect(result.last.requestId, 'REQUEST-2');
+    expect(result.last.hospitalDisplayName, '한양대학교병원');
   });
 
   test('OTHER 취소 상세와 안정적인 멱등성 키를 전송한다', () async {
@@ -79,11 +84,93 @@ void main() {
       ),
     );
 
-    expect(captured.headers['Idempotency-Key'], 'cancel-REQUEST-1');
+    expect(
+      captured.headers['Idempotency-Key'],
+      startsWith('cancel-REQUEST-1-'),
+    );
     expect(_requestJson(captured), <String, Object?>{
       'reason': 'OTHER',
       'detail': '현장 처치 후 이송 불필요',
     });
+  });
+
+  test('응답이 유실된 명령은 같은 멱등성 키와 최초 body로 재시도한다', () async {
+    final List<RequestOptions> captured = <RequestOptions>[];
+    final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
+      ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
+        captured.add(request);
+        if (captured.length == 1) {
+          throw DioException(
+            requestOptions: request,
+            type: DioExceptionType.receiveTimeout,
+          );
+        }
+        return _jsonResponse(<String, Object?>{
+          'transportRequestId': 'REQUEST-RETRY',
+          'status': 'CANCELLED',
+        });
+      });
+    final ApiTransportRepository repository = ApiTransportRepository(
+      dio,
+      pendingCommandStore: InMemoryPendingTransportCommandStore(),
+    );
+
+    await expectLater(
+      repository.cancelRequest(
+        'REQUEST-RETRY',
+        const TransportCancellation(
+          reason: TransportCancellationReason.other,
+          detail: '최초 body',
+        ),
+      ),
+      throwsA(
+        isA<AppException>().having(
+          (AppException error) => error.code,
+          'code',
+          'NETWORK_TIMEOUT',
+        ),
+      ),
+    );
+    await repository.cancelRequest(
+      'REQUEST-RETRY',
+      const TransportCancellation(
+        reason: TransportCancellationReason.sceneResolved,
+      ),
+    );
+
+    expect(captured, hasLength(2));
+    expect(
+      captured[1].headers['Idempotency-Key'],
+      captured[0].headers['Idempotency-Key'],
+    );
+    expect(_requestJson(captured[1]), _requestJson(captured[0]));
+    expect(_requestJson(captured[1])['detail'], '최초 body');
+  });
+
+  test('오래된 임상 기록의 snapshotUpdated false를 호출자에게 전달한다', () async {
+    final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
+      ..httpClientAdapter = _MockHttpClientAdapter(
+        (_) => _jsonResponse(<String, Object?>{
+          'snapshotUpdated': false,
+          'lastClinicalUpdateAt': '2026-08-05T00:00:01Z',
+        }, statusCode: 201),
+      );
+
+    final result = await ApiTransportRepository(dio).addVitalUpdate(
+      'REQUEST-OLD',
+      InTransitVitalUpdate(
+        systolic: 120,
+        diastolic: 80,
+        pulse: 80,
+        respiratoryRate: 18,
+        temperature: 36.5,
+        oxygenSaturation: 98,
+        measuredAt: DateTime.utc(2026, 8, 5),
+      ),
+    );
+
+    expect(result.snapshotUpdated, isFalse);
+    expect(result.lastClinicalUpdateAt, isNotNull);
   });
 
   test('이송 중 의식·Pre-KTAS·처치 변경을 임상 업데이트 API로 전송한다', () async {
@@ -91,7 +178,10 @@ void main() {
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
         captured.add(request);
-        return _jsonResponse(<String, Object?>{}, statusCode: 201);
+        return _jsonResponse(<String, Object?>{
+          'snapshotUpdated': true,
+          'lastClinicalUpdateAt': '2026-08-05T01:05:07Z',
+        }, statusCode: 201);
       });
     final ApiTransportRepository repository = ApiTransportRepository(dio);
     final DateTime observedAt = DateTime.utc(2026, 8, 5, 1, 2, 3);
@@ -138,7 +228,7 @@ void main() {
     );
     expect(
       captured[0].headers['Idempotency-Key'],
-      'consciousness-REQUEST-1-${observedAt.microsecondsSinceEpoch}',
+      startsWith('consciousness-REQUEST-1-'),
     );
     expect(_requestJson(captured[0]), <String, Object?>{
       'avpu': 'UNASSESSABLE',
@@ -154,7 +244,7 @@ void main() {
     );
     expect(
       captured[1].headers['Idempotency-Key'],
-      'prektas-REQUEST-1-${assessedAt.microsecondsSinceEpoch}',
+      startsWith('prektas-REQUEST-1-'),
     );
     expect(_requestJson(captured[1]), <String, Object?>{
       'classificationStatus': 'COMPLETED',
@@ -172,7 +262,7 @@ void main() {
     );
     expect(
       captured[2].headers['Idempotency-Key'],
-      'treatment-REQUEST-1-CPR-${performedAt.microsecondsSinceEpoch}',
+      startsWith('treatment-REQUEST-1-'),
     );
     expect(_requestJson(captured[2]), <String, Object?>{
       'type': 'CPR',
@@ -191,7 +281,17 @@ void main() {
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
         captured = request;
-        return _jsonResponse(<String, Object?>{});
+        return _jsonResponse(<String, Object?>{
+          'transportRequestId': 'REQUEST-1',
+          'latitude': 37.5665,
+          'longitude': 126.978,
+          'capturedAt': '2026-08-06T06:30:10Z',
+          'freshness': 'CURRENT',
+          'ageSeconds': 1,
+          'routeEstimateStatus': 'AVAILABLE',
+          'routeDistanceMeters': 5000,
+          'etaSeconds': 600,
+        });
       });
     final DateTime capturedAt = DateTime.utc(2026, 8, 6, 6, 30, 10);
 
@@ -242,7 +342,7 @@ void main() {
     expect(captured.single.uri.path, '/api/v1/transport-requests');
   });
 
-  test('ACTIVE 목록과 상세·병원 검색으로 이동 중 화면을 복구한다', () async {
+  test('ACTIVE 목록과 상세·병원 검색·위치로 이동 중 화면을 복구한다', () async {
     final Dio dio = DioFactory.create(baseUri: Uri.parse('http://localhost'))
       ..httpClientAdapter = _MockHttpClientAdapter((RequestOptions request) {
         if (request.uri.path == '/api/v1/transport-requests' &&
@@ -268,7 +368,17 @@ void main() {
               'ageYears': 45,
               'sex': 'MALE',
             },
-            'incident': <String, Object?>{'primarySymptom': 'CHEST_PAIN'},
+            'incident': <String, Object?>{
+              'occurrenceType': 'NON_DISEASE',
+              'occurrenceDetail': null,
+              'injuryMechanism': 'TRAFFIC',
+              'injurySites': <Object?>['CHEST'],
+              'primarySymptom': 'CHEST_PAIN',
+              'primarySymptomDetail': '압박감',
+              'secondarySymptoms': <Object?>['DYSPNEA'],
+              'onsetTimeStatus': 'ESTIMATED',
+              'onsetAt': '2026-08-06T06:01:00Z',
+            },
             'supplementalAssessment': <String, Object?>{
               'assessedAt': '2026-08-06T06:08:00Z',
               'enteredAt': '2026-08-06T06:08:30Z',
@@ -281,43 +391,7 @@ void main() {
               'medications': '혈압약',
               'isolationConcern': false,
             },
-            'latestSnapshot': <String, Object?>{
-              'preKtas': <String, Object?>{
-                'classificationStatus': 'COMPLETED',
-                'level': 2,
-                'standardVersion': 'DEV_UNCONFIRMED',
-              },
-              'consciousness': <String, Object?>{'avpu': 'A'},
-              'vitalSigns': <String, Object?>{
-                'measuredAt': '2026-08-06T06:09:00Z',
-                'measurements': <Object?>[
-                  <String, Object?>{
-                    'type': 'BLOOD_PRESSURE',
-                    'state': 'VALUE',
-                    'primaryValue': 120,
-                    'secondaryValue': 80,
-                  },
-                  <String, Object?>{
-                    'type': 'PULSE',
-                    'state': 'VALUE',
-                    'primaryValue': 82,
-                  },
-                  <String, Object?>{
-                    'type': 'RESPIRATORY_RATE',
-                    'state': 'MEASUREMENT_UNAVAILABLE',
-                  },
-                  <String, Object?>{
-                    'type': 'TEMPERATURE',
-                    'state': 'PATIENT_REFUSED',
-                  },
-                  <String, Object?>{
-                    'type': 'SPO2',
-                    'state': 'VALUE',
-                    'primaryValue': 97,
-                  },
-                ],
-              },
-            },
+            'latestSnapshot': <String, Object?>{..._latestSnapshot()},
           });
         }
         if (request.uri.path ==
@@ -341,6 +415,22 @@ void main() {
                 'respondedAt': '2026-08-06T06:05:00Z',
               },
             ],
+          });
+        }
+        if (request.uri.path ==
+            '/api/v1/transport-requests/REQUEST-ACTIVE/location') {
+          return _jsonResponse(<String, Object?>{
+            'transportRequestId': 'REQUEST-ACTIVE',
+            'latitude': 37.55,
+            'longitude': 127.03,
+            'capturedAt': '2026-08-06T06:09:30Z',
+            'freshness': 'CURRENT',
+            'ageSeconds': 30,
+            'routeEstimateStatus': 'AVAILABLE',
+            'routeDistanceMeters': 8100,
+            'etaSeconds': 1020,
+            'lastSuccessfulRouteDistanceMeters': 8100,
+            'lastSuccessfulEtaSeconds': 1020,
           });
         }
         throw StateError('예상하지 못한 요청: ${request.uri}');
@@ -376,11 +466,74 @@ void main() {
     expect(recovery?.transportSession?.patientSummary.rightPupilLabel, '둔함');
     expect(recovery?.transportSession?.patientSummary.medicalHistory, '고혈압');
     expect(
+      recovery?.transportSession?.patientSummary.occurrenceLabel,
+      '비질병·외상',
+    );
+    expect(
+      recovery?.transportSession?.patientSummary.injuryMechanismLabel,
+      '교통사고',
+    );
+    expect(recovery?.transportSession?.patientSummary.injurySitesLabel, '흉부');
+    expect(
+      recovery?.transportSession?.patientSummary.secondarySymptomsLabel,
+      '호흡곤란',
+    );
+    expect(
+      recovery?.transportSession?.patientSummary.latestTreatmentLabel,
+      '산소 투여 · 성공',
+    );
+    expect(recovery?.transportSession?.locationSnapshot?.freshness, 'CURRENT');
+    expect(recovery?.transportSession?.locationSnapshot?.etaSeconds, 1020);
+    expect(
       recovery?.transportSession?.patientSummary.isolationConcern,
       isFalse,
     );
   });
 }
+
+Map<String, Object?> _latestSnapshot() => <String, Object?>{
+  'preKtas': <String, Object?>{
+    'classificationStatus': 'COMPLETED',
+    'level': 2,
+    'exceptionReason': null,
+    'exceptionDetail': null,
+    'assessedAt': '2026-08-06T06:07:00Z',
+    'standardVersion': 'DEV_UNCONFIRMED',
+  },
+  'consciousness': <String, Object?>{
+    'avpu': 'A',
+    'unassessableReason': null,
+    'unassessableDetail': null,
+    'observedAt': '2026-08-06T06:08:00Z',
+  },
+  'vitalSigns': <String, Object?>{
+    'measuredAt': '2026-08-06T06:09:00Z',
+    'measurements': <Object?>[
+      <String, Object?>{
+        'type': 'BLOOD_PRESSURE',
+        'state': 'VALUE',
+        'primaryValue': 120,
+        'secondaryValue': 80,
+      },
+      <String, Object?>{'type': 'PULSE', 'state': 'VALUE', 'primaryValue': 82},
+      <String, Object?>{
+        'type': 'RESPIRATORY_RATE',
+        'state': 'MEASUREMENT_UNAVAILABLE',
+      },
+      <String, Object?>{'type': 'TEMPERATURE', 'state': 'PATIENT_REFUSED'},
+      <String, Object?>{'type': 'SPO2', 'state': 'VALUE', 'primaryValue': 97},
+    ],
+  },
+  'treatments': <Object?>[
+    <String, Object?>{
+      'type': 'OXYGEN',
+      'attemptResult': 'SUCCESS',
+      'performedAt': '2026-08-06T06:09:10Z',
+      'details': <String, Object?>{'flowRateLpm': 5},
+    },
+  ],
+  'lastClinicalUpdateAt': '2026-08-06T06:09:11Z',
+};
 
 class _MockHttpClientAdapter implements HttpClientAdapter {
   _MockHttpClientAdapter(this._handler);

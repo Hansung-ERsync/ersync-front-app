@@ -1,12 +1,16 @@
 import 'package:dio/dio.dart';
 
 import '../../../../core/error/app_exception.dart';
+import '../../../../core/idempotency/idempotency_key_generator.dart';
 import '../../../../core/network/authenticated_request.dart';
 import '../../../../core/network/dio_exception_mapper.dart';
 import '../../../hospital_search/domain/entities/hospital_search_progress.dart';
 import '../../../hospital_search/domain/entities/accepted_hospital.dart';
 import '../../../hospital_search/domain/entities/hospital_search_session.dart';
+import '../../../patient_assessment/domain/entities/assessment_enums.dart';
 import '../../domain/entities/active_transport_recovery.dart';
+import '../../domain/entities/clinical_update_result.dart';
+import '../../domain/entities/transport_location_snapshot.dart';
 import '../../domain/entities/in_transit_clinical_updates.dart';
 import '../../domain/entities/in_transit_vital_update.dart';
 import '../../domain/entities/patient_transport_summary.dart';
@@ -14,13 +18,24 @@ import '../../domain/entities/recent_transport.dart';
 import '../../domain/entities/transport_session.dart';
 import '../../domain/entities/transport_location_update.dart';
 import '../../domain/repositories/transport_repository.dart';
+import '../storage/pending_transport_command_store.dart';
 
 class ApiTransportRepository implements TransportRepository {
-  const ApiTransportRepository(this._dio);
+  ApiTransportRepository(
+    this._dio, {
+    PendingTransportCommandStore? pendingCommandStore,
+    IdempotencyKeyGenerator? idempotencyKeyGenerator,
+  }) : _pendingCommandStore =
+           pendingCommandStore ?? InMemoryPendingTransportCommandStore(),
+       _idempotencyKeyGenerator =
+           idempotencyKeyGenerator ?? IdempotencyKeyGenerator();
 
   final Dio _dio;
+  final PendingTransportCommandStore _pendingCommandStore;
+  final IdempotencyKeyGenerator _idempotencyKeyGenerator;
 
-  Options _options({String? idempotencyKey}) => Options(
+  Options _options({String? idempotencyKey, String? method}) => Options(
+    method: method,
     headers: idempotencyKey == null
         ? null
         : <String, Object>{'Idempotency-Key': idempotencyKey},
@@ -30,6 +45,7 @@ class ApiTransportRepository implements TransportRepository {
   @override
   Future<ActiveTransportRecovery?> recoverActiveTransport() {
     return DioExceptionMapper.guard(() async {
+      await _retryPendingCommands();
       final Response<Object?> listResponse = await _dio.get<Object?>(
         '/api/v1/transport-requests',
         queryParameters: const <String, Object>{
@@ -65,9 +81,8 @@ class ApiTransportRepository implements TransportRepository {
         '/api/v1/transport-requests/$requestId',
         options: _options(),
       );
-      final PatientTransportSummary summary = _patientSummary(
-        _jsonObject(detailResponse.data),
-      );
+      final Map<String, Object?> detail = _jsonObject(detailResponse.data);
+      final PatientTransportSummary summary = _patientSummary(detail);
 
       final Response<Object?> searchResponse = await _dio.get<Object?>(
         '/api/v1/transport-requests/$requestId/hospital-search',
@@ -97,6 +112,10 @@ class ApiTransportRepository implements TransportRepository {
             code: 'INVALID_RESPONSE',
           );
         }
+        final Response<Object?> locationResponse = await _dio.get<Object?>(
+          '/api/v1/transport-requests/$requestId/location',
+          options: _options(),
+        );
         return ActiveTransportRecovery.transport(
           TransportSession(
             requestId: requestId,
@@ -104,6 +123,7 @@ class ApiTransportRepository implements TransportRepository {
             destination: destination,
             patientSummary: summary,
             requestStatus: status,
+            locationSnapshot: _locationSnapshot(locationResponse.data),
           ),
         );
       }
@@ -113,13 +133,19 @@ class ApiTransportRepository implements TransportRepository {
   }
 
   @override
-  Future<void> addVitalUpdate(String requestId, InTransitVitalUpdate update) {
+  Future<ClinicalUpdateResult> addVitalUpdate(
+    String requestId,
+    InTransitVitalUpdate update,
+  ) {
     final String enteredAt = DateTime.now().toUtc().toIso8601String();
     final String measuredAt = update.measuredAt.toUtc().toIso8601String();
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/clinical-updates/vital-signs',
-        data: <String, Object?>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<ClinicalUpdateResult>(
+        operation: 'vitals:$requestId',
+        method: 'POST',
+        path:
+            '/api/v1/transport-requests/$requestId/clinical-updates/vital-signs',
+        body: <String, Object?>{
           'measuredAt': measuredAt,
           'enteredAt': enteredAt,
           'measurements': <Map<String, Object?>>[
@@ -134,24 +160,25 @@ class ApiTransportRepository implements TransportRepository {
             _valueMeasurement('SPO2', update.oxygenSaturation),
           ],
         },
-        options: _options(
-          idempotencyKey:
-              'vitals-$requestId-${update.measuredAt.microsecondsSinceEpoch}',
-        ),
-      );
-    });
+        idempotencyKeyPrefix: 'vitals-$requestId',
+        parse: _clinicalUpdateResult,
+      ),
+    );
   }
 
   @override
-  Future<void> addConsciousnessUpdate(
+  Future<ClinicalUpdateResult> addConsciousnessUpdate(
     String requestId,
     InTransitConsciousnessUpdate update,
   ) {
     final bool isUnassessable = update.avpu.apiValue == 'UNASSESSABLE';
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/clinical-updates/consciousness',
-        data: <String, Object?>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<ClinicalUpdateResult>(
+        operation: 'consciousness:$requestId',
+        method: 'POST',
+        path:
+            '/api/v1/transport-requests/$requestId/clinical-updates/consciousness',
+        body: <String, Object?>{
           'avpu': update.avpu.apiValue,
           'unassessableReason': isUnassessable
               ? update.unassessableReason?.apiValue
@@ -163,25 +190,24 @@ class ApiTransportRepository implements TransportRepository {
           'observedAt': update.observedAt.toUtc().toIso8601String(),
           'enteredAt': update.enteredAt.toUtc().toIso8601String(),
         },
-        options: _options(
-          idempotencyKey:
-              'consciousness-$requestId-${update.observedAt.microsecondsSinceEpoch}',
-        ),
-      );
-    });
+        idempotencyKeyPrefix: 'consciousness-$requestId',
+        parse: _clinicalUpdateResult,
+      ),
+    );
   }
 
   @override
-  Future<void> addPreKtasUpdate(
+  Future<ClinicalUpdateResult> addPreKtasUpdate(
     String requestId,
     InTransitPreKtasUpdate update,
   ) {
     final bool completed = update.classificationStatus.apiValue == 'COMPLETED';
-    final DateTime keyTime = update.assessedAt ?? update.enteredAt;
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/clinical-updates/pre-ktas',
-        data: <String, Object?>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<ClinicalUpdateResult>(
+        operation: 'pre-ktas:$requestId',
+        method: 'POST',
+        path: '/api/v1/transport-requests/$requestId/clinical-updates/pre-ktas',
+        body: <String, Object?>{
           'classificationStatus': update.classificationStatus.apiValue,
           'level': completed ? update.level : null,
           'exceptionReason': completed
@@ -197,16 +223,14 @@ class ApiTransportRepository implements TransportRepository {
           'standardVersion': update.standardVersion,
           'enteredAt': update.enteredAt.toUtc().toIso8601String(),
         },
-        options: _options(
-          idempotencyKey:
-              'prektas-$requestId-${keyTime.microsecondsSinceEpoch}',
-        ),
-      );
-    });
+        idempotencyKeyPrefix: 'prektas-$requestId',
+        parse: _clinicalUpdateResult,
+      ),
+    );
   }
 
   @override
-  Future<void> addTreatmentUpdate(
+  Future<ClinicalUpdateResult> addTreatmentUpdate(
     String requestId,
     InTransitTreatmentUpdate update,
   ) {
@@ -215,51 +239,59 @@ class ApiTransportRepository implements TransportRepository {
       ...update.details,
       if (update.type.apiValue == 'CPR') 'startedAt': performedAt,
     };
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/clinical-updates/treatments',
-        data: <String, Object?>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<ClinicalUpdateResult>(
+        operation: 'treatment:$requestId',
+        method: 'POST',
+        path:
+            '/api/v1/transport-requests/$requestId/clinical-updates/treatments',
+        body: <String, Object?>{
           'type': update.type.apiValue,
           'attemptResult': update.attemptResult.apiValue,
           'details': details,
           'performedAt': performedAt,
           'enteredAt': update.enteredAt.toUtc().toIso8601String(),
         },
-        options: _options(
-          idempotencyKey:
-              'treatment-$requestId-${update.type.apiValue}-${update.performedAt.microsecondsSinceEpoch}',
-        ),
-      );
-    });
+        idempotencyKeyPrefix: 'treatment-$requestId',
+        parse: _clinicalUpdateResult,
+      ),
+    );
   }
 
   @override
   Future<void> requestHandoff(TransportSession session) {
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/${session.requestId}/handoff-request',
-        options: _options(idempotencyKey: 'handoff-${session.requestId}'),
-      );
-    });
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<void>(
+        operation: 'handoff:${session.requestId}',
+        method: 'POST',
+        path: '/api/v1/transport-requests/${session.requestId}/handoff-request',
+        idempotencyKeyPrefix: 'handoff-${session.requestId}',
+        parse: (_) {},
+      ),
+    );
   }
 
   @override
-  Future<void> updateLocation(
+  Future<TransportLocationSnapshot> updateLocation(
     String requestId,
     TransportLocationUpdate update,
     String idempotencyKey,
   ) {
-    return DioExceptionMapper.guard(() async {
-      await _dio.put<Object?>(
-        '/api/v1/transport-requests/$requestId/location',
-        data: <String, Object>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<TransportLocationSnapshot>(
+        operation: 'location:$requestId',
+        method: 'PUT',
+        path: '/api/v1/transport-requests/$requestId/location',
+        body: <String, Object?>{
           'latitude': update.latitude,
           'longitude': update.longitude,
           'capturedAt': update.capturedAt.toUtc().toIso8601String(),
         },
-        options: _options(idempotencyKey: idempotencyKey),
-      );
-    });
+        idempotencyKeyPrefix: 'location-$requestId',
+        preferredIdempotencyKey: idempotencyKey,
+        parse: _locationSnapshot,
+      ),
+    );
   }
 
   @override
@@ -267,17 +299,93 @@ class ApiTransportRepository implements TransportRepository {
     String requestId,
     TransportCancellation cancellation,
   ) {
-    return DioExceptionMapper.guard(() async {
-      await _dio.post<Object?>(
-        '/api/v1/transport-requests/$requestId/cancel',
-        data: <String, Object?>{
+    return DioExceptionMapper.guard(
+      () => _sendIdempotent<void>(
+        operation: 'cancel:$requestId',
+        method: 'POST',
+        path: '/api/v1/transport-requests/$requestId/cancel',
+        body: <String, Object?>{
           'reason': cancellation.reason.apiValue,
           if (cancellation.normalizedDetail != null)
             'detail': cancellation.normalizedDetail,
         },
-        options: _options(idempotencyKey: 'cancel-$requestId'),
+        idempotencyKeyPrefix: 'cancel-$requestId',
+        parse: (_) {},
+      ),
+    );
+  }
+
+  Future<T> _sendIdempotent<T>({
+    required String operation,
+    required String method,
+    required String path,
+    required String idempotencyKeyPrefix,
+    required T Function(Object? value) parse,
+    Map<String, Object?>? body,
+    String? preferredIdempotencyKey,
+  }) async {
+    PendingTransportCommand? command = await _pendingCommandStore.read(
+      operation,
+    );
+    command ??= PendingTransportCommand(
+      operation: operation,
+      method: method,
+      path: path,
+      idempotencyKey:
+          preferredIdempotencyKey ??
+          _idempotencyKeyGenerator.create(idempotencyKeyPrefix),
+      body: body,
+    );
+    await _pendingCommandStore.write(command);
+    try {
+      final Response<Object?> response = await _dio.request<Object?>(
+        command.path,
+        data: command.body,
+        options: _options(
+          method: command.method,
+          idempotencyKey: command.idempotencyKey,
+        ),
       );
-    });
+      final T result = parse(response.data);
+      await _pendingCommandStore.remove(operation);
+      return result;
+    } on DioException catch (error) {
+      if (_isDefinitiveCommandFailure(error)) {
+        await _pendingCommandStore.remove(operation);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _retryPendingCommands() async {
+    final List<PendingTransportCommand> commands = await _pendingCommandStore
+        .readAll();
+    for (final PendingTransportCommand command in commands) {
+      try {
+        await _dio.request<Object?>(
+          command.path,
+          data: command.body,
+          options: _options(
+            method: command.method,
+            idempotencyKey: command.idempotencyKey,
+          ),
+        );
+        await _pendingCommandStore.remove(command.operation);
+      } on DioException catch (error) {
+        if (!_isDefinitiveCommandFailure(error)) {
+          rethrow;
+        }
+        await _pendingCommandStore.remove(command.operation);
+      }
+    }
+  }
+
+  bool _isDefinitiveCommandFailure(DioException error) {
+    final int? statusCode = error.response?.statusCode;
+    return statusCode != null &&
+        statusCode >= 400 &&
+        statusCode < 500 &&
+        statusCode != 401;
   }
 
   @override
@@ -300,14 +408,7 @@ class ApiTransportRepository implements TransportRepository {
           code: 'INVALID_RESPONSE',
         );
       }
-      return rawItems
-          .map(_recentTransport)
-          .where(
-            (RecentTransport transport) =>
-                transport.handoffStatus != HandoffStatus.cancelled ||
-                transport.hasDestination,
-          )
-          .toList(growable: false);
+      return rawItems.map(_recentTransport).toList(growable: false);
     });
   }
 
@@ -328,6 +429,9 @@ class ApiTransportRepository implements TransportRepository {
       snapshot['consciousness'],
     );
     final Map<String, Object?> vitalSigns = _jsonObject(snapshot['vitalSigns']);
+    final List<Map<String, Object?>> treatments = _jsonObjectList(
+      snapshot['treatments'],
+    );
     final Map<String, Object?> supplemental =
         _optionalJsonObject(detail['supplementalAssessment']) ??
         const <String, Object?>{};
@@ -360,6 +464,7 @@ class ApiTransportRepository implements TransportRepository {
       'classificationStatus',
     );
     final int? preKtasLevel = _int(preKtas['level']);
+    final Map<String, Object?>? latestTreatment = _latestTreatment(treatments);
     return PatientTransportSummary(
       ageLabel: switch (ageStatus) {
         'EXACT' when ageYears != null => '$ageYears세',
@@ -404,6 +509,201 @@ class ApiTransportRepository implements TransportRepository {
       medications: _optionalString(supplemental['medications']),
       isolationConcern: supplemental['isolationConcern'] as bool?,
       supplementalAssessedAt: _nullableDate(supplemental['assessedAt']),
+      occurrenceLabel: _enumLabel(
+        OccurrenceType.values.map(
+          (OccurrenceType value) => (value.apiValue, value.label),
+        ),
+        _optionalString(incident['occurrenceType']),
+      ),
+      occurrenceDetail: _optionalString(incident['occurrenceDetail']),
+      injuryMechanismLabel: _enumLabel(
+        InjuryMechanism.values.map(
+          (InjuryMechanism value) => (value.apiValue, value.label),
+        ),
+        _optionalString(incident['injuryMechanism']),
+      ),
+      injurySitesLabel: _enumLabels(
+        InjurySite.values.map(
+          (InjurySite value) => (value.apiValue, value.label),
+        ),
+        incident['injurySites'],
+      ),
+      primarySymptomDetail: _optionalString(incident['primarySymptomDetail']),
+      secondarySymptomsLabel: _enumLabels(
+        PatientSymptom.values.map(
+          (PatientSymptom value) => (value.apiValue, value.label),
+        ),
+        incident['secondarySymptoms'],
+      ),
+      onsetLabel: _onsetLabel(incident),
+      preKtasDetailLabel: _clinicalExceptionLabel(
+        reason: _optionalString(preKtas['exceptionReason']),
+        detail: _optionalString(preKtas['exceptionDetail']),
+        values: EmergencyExceptionReason.values.map(
+          (EmergencyExceptionReason value) => (value.apiValue, value.label),
+        ),
+      ),
+      consciousnessDetailLabel: _clinicalExceptionLabel(
+        reason: _optionalString(consciousness['unassessableReason']),
+        detail: _optionalString(consciousness['unassessableDetail']),
+        values: UnassessableReason.values.map(
+          (UnassessableReason value) => (value.apiValue, value.label),
+        ),
+      ),
+      latestTreatmentLabel: latestTreatment == null
+          ? null
+          : _treatmentLabel(latestTreatment),
+      latestTreatmentAt: latestTreatment == null
+          ? null
+          : _nullableDate(latestTreatment['performedAt']),
+      lastClinicalUpdateAt: _nullableDate(snapshot['lastClinicalUpdateAt']),
+    );
+  }
+
+  String? _onsetLabel(Map<String, Object?> incident) {
+    final String? status = _optionalString(incident['onsetTimeStatus']);
+    if (status == null) {
+      return null;
+    }
+    if (status == 'UNKNOWN') {
+      return '확인 불가';
+    }
+    final DateTime? onsetAt = _nullableDate(incident['onsetAt']);
+    if (onsetAt == null) {
+      return _enumLabel(
+        ClinicalTimeStatus.values.map(
+          (ClinicalTimeStatus value) => (value.apiValue, value.label),
+        ),
+        status,
+      );
+    }
+    final String prefix = status == 'ESTIMATED' ? '추정 · ' : '';
+    return '$prefix${_dateTimeLabel(onsetAt)}';
+  }
+
+  Map<String, Object?>? _latestTreatment(
+    List<Map<String, Object?>> treatments,
+  ) {
+    Map<String, Object?>? latest;
+    DateTime? latestAt;
+    for (final Map<String, Object?> treatment in treatments) {
+      if (treatment['type'] == 'NONE') {
+        continue;
+      }
+      final DateTime? performedAt = _nullableDate(treatment['performedAt']);
+      if (latest == null ||
+          (performedAt != null &&
+              (latestAt == null || performedAt.isAfter(latestAt)))) {
+        latest = treatment;
+        latestAt = performedAt;
+      }
+    }
+    return latest;
+  }
+
+  String _dateTimeLabel(DateTime value) {
+    String twoDigits(int number) => number.toString().padLeft(2, '0');
+    return '${value.year}.${twoDigits(value.month)}.${twoDigits(value.day)} '
+        '${twoDigits(value.hour)}:${twoDigits(value.minute)}';
+  }
+
+  String? _clinicalExceptionLabel({
+    required String? reason,
+    required String? detail,
+    required Iterable<(String, String)> values,
+  }) {
+    if (reason == null) {
+      return detail;
+    }
+    final String label = _enumLabel(values, reason) ?? reason;
+    return detail == null ? label : '$label · $detail';
+  }
+
+  String? _treatmentLabel(Map<String, Object?> treatment) {
+    final String? type = _optionalString(treatment['type']);
+    if (type == null || type == 'NONE') {
+      return null;
+    }
+    final String typeLabel =
+        _enumLabel(
+          TreatmentType.values.map(
+            (TreatmentType value) => (value.apiValue, value.label),
+          ),
+          type,
+        ) ??
+        type;
+    final String? attemptResult = _optionalString(treatment['attemptResult']);
+    if (attemptResult == null) {
+      return typeLabel;
+    }
+    final String resultLabel =
+        _enumLabel(
+          TreatmentAttemptResult.values.map(
+            (TreatmentAttemptResult value) => (value.apiValue, value.label),
+          ),
+          attemptResult,
+        ) ??
+        attemptResult;
+    return '$typeLabel · $resultLabel';
+  }
+
+  String? _enumLabel(Iterable<(String, String)> values, String? apiValue) {
+    if (apiValue == null) {
+      return null;
+    }
+    for (final (String value, String label) in values) {
+      if (value == apiValue) {
+        return label;
+      }
+    }
+    return null;
+  }
+
+  String? _enumLabels(Iterable<(String, String)> values, Object? rawValues) {
+    if (rawValues is! List<Object?> || rawValues.isEmpty) {
+      return null;
+    }
+    final List<String> labels = rawValues
+        .whereType<String>()
+        .map((String value) => _enumLabel(values, value) ?? value)
+        .toList(growable: false);
+    return labels.isEmpty ? null : labels.join(', ');
+  }
+
+  ClinicalUpdateResult _clinicalUpdateResult(Object? value) {
+    final Map<String, Object?> json = _jsonObject(value);
+    final Object? snapshotUpdated = json['snapshotUpdated'];
+    if (snapshotUpdated is! bool) {
+      throw const AppException(
+        '임상 갱신 응답을 처리할 수 없습니다.',
+        code: 'INVALID_RESPONSE',
+      );
+    }
+    return ClinicalUpdateResult(
+      snapshotUpdated: snapshotUpdated,
+      lastClinicalUpdateAt: _nullableDate(json['lastClinicalUpdateAt']),
+    );
+  }
+
+  TransportLocationSnapshot _locationSnapshot(Object? value) {
+    final Map<String, Object?> json = _jsonObject(value);
+    final String freshness = _string(json, 'freshness');
+    return TransportLocationSnapshot(
+      freshness: freshness,
+      latitude: _double(json['latitude']),
+      longitude: _double(json['longitude']),
+      capturedAt: _nullableDate(json['capturedAt']),
+      ageSeconds: _int(json['ageSeconds']),
+      routeEstimateStatus: _optionalString(json['routeEstimateStatus']),
+      routeDistanceMeters: _int(json['routeDistanceMeters']),
+      etaSeconds: _int(json['etaSeconds']),
+      lastSuccessfulRouteDistanceMeters: _int(
+        json['lastSuccessfulRouteDistanceMeters'],
+      ),
+      lastSuccessfulEtaSeconds: _int(json['lastSuccessfulEtaSeconds']),
+      lastSuccessfulEtaCalculatedAt: _nullableDate(
+        json['lastSuccessfulEtaCalculatedAt'],
+      ),
     );
   }
 
@@ -552,6 +852,13 @@ class ApiTransportRepository implements TransportRepository {
       return Map<String, Object?>.from(value);
     }
     return null;
+  }
+
+  List<Map<String, Object?>> _jsonObjectList(Object? value) {
+    if (value is! List<Object?>) {
+      return const <Map<String, Object?>>[];
+    }
+    return value.map(_jsonObject).toList(growable: false);
   }
 
   String _string(Map<String, Object?> json, String key) {

@@ -2,10 +2,13 @@ import 'dart:async';
 
 import '../../domain/entities/in_transit_clinical_updates.dart';
 import '../../domain/entities/in_transit_vital_update.dart';
+import '../../domain/entities/clinical_update_result.dart';
 import '../../domain/entities/recent_transport.dart';
 import '../../domain/entities/transport_session.dart';
 
 class MockTransportDataSource {
+  bool snapshotUpdated = true;
+
   final Map<String, List<InTransitVitalUpdate>> _updates =
       <String, List<InTransitVitalUpdate>>{};
   final StreamController<List<RecentTransport>> _recentTransportController =
@@ -31,33 +34,49 @@ class MockTransportDataSource {
     ),
   ];
 
-  Future<void> addVitalUpdate(
+  Future<ClinicalUpdateResult> addVitalUpdate(
     String requestId,
     InTransitVitalUpdate update,
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
     _updates.putIfAbsent(requestId, () => <InTransitVitalUpdate>[]).add(update);
+    return ClinicalUpdateResult(
+      snapshotUpdated: snapshotUpdated,
+      lastClinicalUpdateAt: DateTime.now(),
+    );
   }
 
-  Future<void> addConsciousnessUpdate(
+  Future<ClinicalUpdateResult> addConsciousnessUpdate(
     String requestId,
     InTransitConsciousnessUpdate update,
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
+    return ClinicalUpdateResult(
+      snapshotUpdated: snapshotUpdated,
+      lastClinicalUpdateAt: DateTime.now(),
+    );
   }
 
-  Future<void> addPreKtasUpdate(
+  Future<ClinicalUpdateResult> addPreKtasUpdate(
     String requestId,
     InTransitPreKtasUpdate update,
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
+    return ClinicalUpdateResult(
+      snapshotUpdated: snapshotUpdated,
+      lastClinicalUpdateAt: DateTime.now(),
+    );
   }
 
-  Future<void> addTreatmentUpdate(
+  Future<ClinicalUpdateResult> addTreatmentUpdate(
     String requestId,
     InTransitTreatmentUpdate update,
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 180));
+    return ClinicalUpdateResult(
+      snapshotUpdated: snapshotUpdated,
+      lastClinicalUpdateAt: DateTime.now(),
+    );
   }
 
   Future<void> requestHandoff(TransportSession session) async {
