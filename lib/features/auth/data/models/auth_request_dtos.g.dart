@@ -30,3 +30,10 @@ Map<String, dynamic> _$LoginRequestDtoToJson(LoginRequestDto instance) =>
       'password': instance.password,
       'role': instance.role,
     };
+
+Map<String, dynamic> _$ParamedicProfileUpdateRequestDtoToJson(
+  ParamedicProfileUpdateRequestDto instance,
+) => <String, dynamic>{
+  'displayName': instance.displayName,
+  'callbackContact': instance.callbackContact,
+};

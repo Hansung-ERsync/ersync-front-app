@@ -46,5 +46,19 @@ class MockAuthRepository implements AuthRepository {
   Future<AuthUser?> restoreSession() async => null;
 
   @override
-  Future<void> signOut() async {}
+  Future<AuthUser> getMyProfile() => _dataSource.getMyProfile();
+
+  @override
+  Future<AuthUser> updateMyProfile({
+    required String displayName,
+    required String callbackContact,
+  }) {
+    return _dataSource.updateMyProfile(
+      displayName: displayName,
+      callbackContact: callbackContact,
+    );
+  }
+
+  @override
+  Future<void> signOut() => _dataSource.signOut();
 }

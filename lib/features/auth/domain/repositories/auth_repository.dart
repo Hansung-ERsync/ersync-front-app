@@ -18,5 +18,12 @@ abstract interface class AuthRepository {
 
   Future<AuthUser?> restoreSession();
 
+  Future<AuthUser> getMyProfile();
+
+  Future<AuthUser> updateMyProfile({
+    required String displayName,
+    required String callbackContact,
+  });
+
   Future<void> signOut();
 }

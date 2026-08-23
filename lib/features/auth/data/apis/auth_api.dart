@@ -28,4 +28,10 @@ abstract class AuthApi {
   @AuthenticatedRequest()
   @GET('/api/v1/paramedics/me')
   Future<ParamedicProfileResponseDto> getMyProfile();
+
+  @AuthenticatedRequest()
+  @PUT('/api/v1/paramedics/me')
+  Future<ParamedicProfileResponseDto> updateMyProfile(
+    @Body() ParamedicProfileUpdateRequestDto request,
+  );
 }

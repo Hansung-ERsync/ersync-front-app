@@ -118,13 +118,40 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<AuthUser> getMyProfile() =>
+      _runProfileRequest(() async => (await _api.getMyProfile()).toEntity());
+
+  @override
+  Future<AuthUser> updateMyProfile({
+    required String displayName,
+    required String callbackContact,
+  }) {
+    return _runProfileRequest(
+      () async => (await _api.updateMyProfile(
+        ParamedicProfileUpdateRequestDto(
+          displayName: displayName.trim(),
+          callbackContact: callbackContact.trim(),
+        ),
+      )).toEntity(),
+    );
+  }
+
+  @override
   Future<void> signOut() => _tokenStorage.clear();
 
-  Future<AuthUser> _getMyProfile() {
-    return DioExceptionMapper.guard(() async {
-      final ParamedicProfileResponseDto response = await _api.getMyProfile();
-      return response.toEntity();
-    });
+  Future<AuthUser> _getMyProfile() => getMyProfile();
+
+  Future<AuthUser> _runProfileRequest(
+    Future<AuthUser> Function() request,
+  ) async {
+    try {
+      return await DioExceptionMapper.guard(request);
+    } on AppException catch (error) {
+      if (_shouldClearSession(error)) {
+        await _tokenStorage.clear();
+      }
+      rethrow;
+    }
   }
 
   bool _shouldClearSession(AppException error) {
